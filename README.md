@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="./jackblack-opening-book.gif" alt="Jack Black opening book" width="600"/>
+</p>
+
 <h1 align="center">🎧 ECHO 🎧</h1>
 
 <div align="center">
