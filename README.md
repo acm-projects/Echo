@@ -21,17 +21,18 @@ Don't like a voice Echo picked? Customize it to your liking, or clone a voice sa
 - Mobile app with Library, Upload, Media Player, Character Customization, and Profile screens
 - Character voice customization (describe a voice or upload a clip to clone one)
 - Offline playback position sync (remembers where you left off, synced across devices)
+- Sleep timer
 
 ## Stretch Goals
 
-- Voice activation with wake word + command (likely Picovoice)
-- Text tracking/highlighting in the book as each line is narrated (requires character-aligned timing in the narration script)
+- Voice activation with wake word + command
+- Text tracking/highlighting in the book as each line is narrated
 - Spoiler-free book/chapter/character summaries
 - Generated pixel art character portraits (or user-uploaded pictures)
 - Character Chat — talk to the characters and have them respond to you
 - Audiobook sharing hub and community features (browse shared audiobooks, comments/reviews, favorites)
 - Audiobook MP3 export with chapter markers
-- A way to acknowledge pictures/illustrations in the audio
+- A way to acknowledge pictures/illustrations, footnotes
 
 ---
 
@@ -92,3 +93,7 @@ Don't like a voice Echo picked? Customize it to your liking, or clone a voice sa
 - VS Code (or your preferred IDE)
 - Supabase account + CLI
 - AWS
+
+## The Team
+
+- Industry Mentor: Srinivas Bojja
