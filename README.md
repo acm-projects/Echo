@@ -101,3 +101,4 @@ Don't like a voice Echo picked? Customize it to your liking, or clone a voice sa
 - Team member: Nitish Raj
 - Team Member: Nicole
 - Team Member: Juwairiya
+- Team Member: Zed Bradley
