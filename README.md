@@ -96,4 +96,5 @@ Don't like a voice Echo picked? Customize it to your liking, or clone a voice sa
 
 ## The Team
 
+- Project Manager: Allen Zheng
 - Industry Mentor: Srinivas Bojja
