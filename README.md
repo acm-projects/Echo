@@ -99,6 +99,6 @@ Don't like a voice Echo picked? Customize it to your liking, or clone a voice sa
 - Project Manager: Allen Zheng
 - Industry Mentor: Srinivas Bojja
 - Team member: Nitish Raj
-
+- Team Member: Nicole
 
 
