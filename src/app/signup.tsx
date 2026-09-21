@@ -19,22 +19,24 @@ import {
 WebBrowser.maybeCompleteAuthSession();
 
 export default function LoginScreen() {
-  const handleLogin =  async () => {
-    const { error } = await supabase.auth.signInWithPassword({ email, password })
-    if (error) {Alert.alert('Login failed', error.message)
-    } else {
-      router.push('../home');
-    }
-
+  const handleSignin =  async () => {
+    const { data, error } = await supabase.auth.signUp({
+  email,
+  password,
+  options: { data: { username } }, 
+})
+  router.push('/login');
   };
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [username, setUsername] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+   const [showCPassword, setShowCPassword] = useState(false);
 
   const [loading, setLoading] = useState(false);
-  const [couldNotLogin, setCouldNotLogin] = useState(false);
+  const [confirmPassword, setConfirmPassword] = useState('');
 
-  // Redirect URI without useProxy
+
 
   const router = useRouter(); 
 
@@ -56,11 +58,24 @@ export default function LoginScreen() {
       >
         
 
-        <Text style={styles.title}>Welcome To Echo</Text>
-        <Text style={styles.subtitle}>Sign in to your account</Text>
+        <Text style={styles.title}>Create Your Echo Account!</Text>
 
         <View style={styles.inputGroup}>
           <Text style={styles.label}>Username</Text>
+          <TextInput
+            value={username}
+            onChangeText={setUsername}
+            style={styles.input}
+            placeholder="yourusername"
+            placeholderTextColor="#999"
+            autoCapitalize="none"
+            keyboardType="email-address"
+          />
+        </View>
+        
+
+        <View style={styles.inputGroup}>
+          <Text style={styles.label}>Email</Text>
           <TextInput
             value={email}
             onChangeText={setEmail}
@@ -96,18 +111,42 @@ export default function LoginScreen() {
           </View>
         </View>
 
-        <TouchableOpacity style={styles.loginButton} onPress={handleLogin}>
-          <Text style={styles.loginText}>Sign In</Text>
+        <View style={styles.inputGroup}>
+          <Text style={styles.label}>Password</Text>
+          <View style={styles.passwordRow}>
+            <TextInput
+              value={confirmPassword}
+              onChangeText={setConfirmPassword}
+              style={styles.passwordInput}
+              placeholder="••••••••"
+              placeholderTextColor="#999"
+              secureTextEntry={!showCPassword}
+            />
+            <TouchableOpacity
+              onPress={() => setShowCPassword(!showCPassword)}
+              style={styles.eyeIcon}
+            >
+              <Feather
+                name={showCPassword ? 'eye-off' : 'eye'}
+                size={20}
+                color="#999"
+              />
+            </TouchableOpacity>
+          </View>
+          {confirmPassword !== password && confirmPassword.length > 0 && (
+            <Text style={{ color: 'red', marginTop: 5 }}>Passwords do not match</Text>
+          )}
+        </View>
+        
+        
+
+        <TouchableOpacity style={styles.loginButton} onPress={handleSignin}>
+          <Text style={styles.loginText}>Create Account</Text>
         </TouchableOpacity>
 
         
 
-        <TouchableOpacity
-          style={styles.secondaryAction}
-          onPress={() => router.push('../signup')}
-        >
-          <Text style={styles.secondaryText}>Don't have an account? Sign Up</Text>
-        </TouchableOpacity>
+       
       </KeyboardAvoidingView>
     
   );
