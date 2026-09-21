@@ -96,8 +96,9 @@ Don't like a voice Echo picked? Customize it to your liking, or clone a voice sa
 
 ## The Team
 
+- Project Manager: Allen Zheng
 - Industry Mentor: Srinivas Bojja
 - Team member: Nitish Raj
-
-
-
+- Team Member: Nicole
+- Team Member: Juwairiya
+- Team Member: Zed Bradley
