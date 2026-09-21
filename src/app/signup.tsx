@@ -13,6 +13,7 @@ import {
   TouchableOpacity,
   View,
   Alert,
+  ScrollView,
 } from 'react-native';
 
 
@@ -58,7 +59,10 @@ export default function LoginScreen() {
         style={styles.container}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
-        
+        <ScrollView
+        contentContainerStyle={styles.container}
+        keyboardShouldPersistTaps="handled"
+        >
 
         <Text style={styles.title}>Create Your Echo Account!</Text>
 
@@ -145,6 +149,7 @@ export default function LoginScreen() {
         <TouchableOpacity style={styles.loginButton} onPress={handleSignin}>
           <Text style={styles.loginText}>Create Account</Text>
         </TouchableOpacity>
+        </ScrollView>
 
         
 

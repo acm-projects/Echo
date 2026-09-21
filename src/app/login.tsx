@@ -13,6 +13,7 @@ import {
   TouchableOpacity,
   View,
   Alert,
+  ScrollView,
 } from 'react-native';
 
 
@@ -54,6 +55,10 @@ export default function LoginScreen() {
         style={styles.container}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
+        <ScrollView
+        contentContainerStyle={styles.container}
+        keyboardShouldPersistTaps="handled"
+        >
         
 
         <Text style={styles.title}>Welcome To Echo</Text>
@@ -99,15 +104,13 @@ export default function LoginScreen() {
         <TouchableOpacity style={styles.loginButton} onPress={handleLogin}>
           <Text style={styles.loginText}>Sign In</Text>
         </TouchableOpacity>
-
-        
-
         <TouchableOpacity
           style={styles.secondaryAction}
           onPress={() => router.push('../signup')}
         >
           <Text style={styles.secondaryText}>Don't have an account? Sign Up</Text>
         </TouchableOpacity>
+        </ScrollView>
       </KeyboardAvoidingView>
     
   );
@@ -119,7 +122,7 @@ const styles = StyleSheet.create({
     backgroundColor: "white",
   },
   container: {
-    flex: 1,
+    flexGrow: 1,
     padding: 24,
     justifyContent: 'center',
   },
