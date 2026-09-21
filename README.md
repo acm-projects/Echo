@@ -101,7 +101,7 @@ Don't like a voice Echo picked? Customize it to your liking, or clone a voice sa
 | **git checkout -b "branch name"** | Same as 2 previous commands together |
 | **git branch -d "branch name"** | Delete a local branch (safe — only works if merged) |
 | **git branch -D "branch name"** | Force-delete a local branch (even if unmerged) |
-| **git add .**| Finds all changed files |
+| **git add .**| Finds all changed files and adds them to git tracking|
 | **git commit -m "Testing123"** | Commit with message |
 | **git push origin "branch"** | Push to branch |
 | **git pull origin "branch"** | Pull updates from a specific branch |
