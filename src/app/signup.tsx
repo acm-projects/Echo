@@ -19,14 +19,16 @@ import {
 WebBrowser.maybeCompleteAuthSession();
 
 export default function LoginScreen() {
-  const handleSignin =  async () => {
-    const { data, error } = await supabase.auth.signUp({
-  email,
-  password,
-  options: { data: { username } }, 
-})
-  router.push('/login');
-  };
+  const handleSignin = async () => {
+  const { data, error } = await supabase.auth.signUp({
+    email,
+    password,
+    options: { data: { username } },
+  })
+  console.log('signup result:', { data, error })
+  if (error) return
+  router.push('/login')
+}
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [username, setUsername] = useState('');
