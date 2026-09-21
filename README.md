@@ -61,13 +61,8 @@ Don't like a voice Echo picked? Customize it to your liking, or clone a voice sa
 - **Laptop Server:** FastAPI + Python
   - [FastAPI Course for Beginners](https://www.youtube.com/watch?v=tLKKmouUams)
   - [WebSockets - FastAPI](https://fastapi.tiangolo.com/advanced/websockets/)
-- **Local LLM:** Ollama
-  - [Ollama Tutorial for Beginners (2026): Run LLM Models Locally for Free](https://www.youtube.com/watch?v=fU38n-CH7ds)
-  - [How to Run Local LLMs with Ollama: A Step-by-Step Guide](https://www.youtube.com/watch?v=N4haIG4kWN8)
-- **Voice Generation:** Qwen3-TTS
-  - [Qwen3-TTS (Official repo)](https://github.com/QwenLM/Qwen3-TTS)
-  - [Qwen3-TTS-Openai-Fastapi (FastAPI wrapper)](https://github.com/groxaxo/Qwen3-TTS-Openai-Fastapi)
-  - [Elevenlabs just got wrecked. This free AI text to speech is WILD!](https://www.youtube.com/watch?v=eC8mZceIy5k)
+- **LLM:** Up to yall
+- **Voice Generation:** Also up to yall
 - **Voice Activation:** Picovoice
   - [How to Add Wake Word Detection to React Native Apps](https://picovoice.ai/blog/wake-word-detection-in-react-native/)
   - [Porcupine Wake Word React Native Quick Start](https://picovoice.ai/docs/quick-start/porcupine-react-native/)
@@ -93,6 +88,30 @@ Don't like a voice Echo picked? Customize it to your liking, or clone a voice sa
 - VS Code (or your preferred IDE)
 - Supabase account + CLI
 - AWS
+
+## GitHub Cheat Sheet
+
+| Command | Description |
+| ------ | ------ |
+| **cd <director>** | Change directories over to our repository |
+| **git status** | See what's changed, staged, or untracked in your working directory |
+| **git branch** | Lists branches for you |
+| **git branch "branch name"** | Makes new branch |
+| **git checkout "branch name"** | Switch to branch |
+| **git checkout -b "branch name"** | Same as 2 previous commands together |
+| **git branch -d "branch name"** | Delete a local branch (safe — only works if merged) |
+| **git branch -D "branch name"** | Force-delete a local branch (even if unmerged) |
+| **git add .**| Finds all changed files |
+| **git commit -m "Testing123"** | Commit with message |
+| **git push origin "branch"** | Push to branch |
+| **git pull origin "branch"** | Pull updates from a specific branch |
+| **git fetch origin** | Download changes from remote without merging them into your local branch |
+| **git merge "branch name"** | Merge specified branch into your current branch |
+| **git merge --abort** | Cancel a merge if you hit conflicts and want to back out |
+| **git commit hash** (find on GitHub or run `git log --oneline` in the terminal), then run **`git revert <commit-hash> --no-edit`** | Undo a commit that has been pushed |
+| **git reset --soft HEAD~** | Undo commit (not pushed) but *keep* the changes |
+| **git rm --cached "filename"** | Remove a file from git tracking but keep it locally |
+| **git rm -r --cached "foldername"** | Remove a folder from git tracking but keep it locally |
 
 ## The Team
 
