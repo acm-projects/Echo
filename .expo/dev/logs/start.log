@@ -601,3 +601,74 @@
 {"_e":"metro:bundling:progress","_t":1789965940697,"id":"f","progress":0,"total":1,"current":0}
 {"_e":"metro:bundling:done","_t":1789965940765,"id":"f","total":1,"ms":68.824}
 {"_e":"metro:client_log","_t":1789966196983,"level":"log","data":["signup result:","{\"data\": {\"session\": null, \"user\": {\"app_metadata\": [Object], \"aud\": \"authenticated\", \"confirmation_sent_at\": \"2026-09-21T04:49:55.391779681Z\", \"created_at\": \"2026-09-21T04:49:55.35704Z\", \"email\": \"dal363209@utdallas.edu\", \"id\": \"0ba503d8-5db1-4a86-9f8d-de2550389ba0\", \"identities\": [Array], \"is_anonymous\": false, \"phone\": \"\", \"role\": \"authenticated\", \"updated_at\": \"2026-09-21T04:49:56.914533Z\", \"user_metadata\": [Object]}}, \"error\": null}"]}
+{"_e":"root:init","_t":1790096218424,"format":"v0-jsonl","version":"57.0.26"}
+{"_e":"env:mode","_t":1790096218424,"nodeEnv":"development","babelEnv":"development","mode":"development"}
+{"_e":"env:load","_t":1790096218426,"mode":"development","files":["../../../.env"],"env":{"EXPO_PUBLIC_SUPABASE_ANON_KEY":"sb_publishable_YMQMKAQcDPX7Jx37Qb9cwA_4OWTxTx4","EXPO_PUBLIC_SUPABASE_URL":"https://pbdmireqwryictofgatk.supabase.co","SUPABASE_JWKS_URL":"https://pbdmireqwryictofgatk.supabase.co/auth/v1/.well-known/jwks.json","SUPABASE_PUBLISHABLE_KEY":"sb_publishable_YMQMKAQcDPX7Jx37Qb9cwA_4OWTxTx4","SUPABASE_URL":"https://pbdmireqwryictofgatk.supabase.co"}}
+{"_e":"devserver:start","_t":1790096218665,"mode":"development","web":true,"baseUrl":"","asyncRoutes":false,"routerRoot":"../../../src/app","serverComponents":false,"serverActions":false,"serverRendering":true,"apiRoutes":false,"exporting":false}
+{"_e":"metro:config","_t":1790096218870,"serverRoot":"../../..","projectRoot":"../../..","exporting":false,"flags":{"autolinkingModuleResolution":false,"serverActions":false,"serverComponents":false,"reactCompiler":true,"optimizeGraph":false,"treeshaking":false,"logbox":false}}
+{"_e":"expo:dev-tools-plugin:load","_t":1790096218995,"plugins":[]}
+{"_e":"metro:instantiate","_t":1790096219330,"atlas":false,"workers":7,"host":"::","port":8081}
+{"_e":"metro:bundling:started","_t":1790096221524,"id":"2","platform":"web","environment":null,"entry":"node_modules/expo-router/entry.js"}
+{"_e":"metro:bundling:progress","_t":1790096221524,"id":"2","progress":0,"total":1,"current":0}
+{"_e":"metro:bundling:started","_t":1790096221525,"id":"3","platform":"web","environment":"node","entry":"node_modules/expo/node_modules/@expo/cli/node_modules/@expo/router-server/node/render.js"}
+{"_e":"metro:bundling:progress","_t":1790096221525,"id":"2","progress":0,"total":1,"current":0}
+{"_e":"metro:bundling:progress","_t":1790096221525,"id":"3","progress":0,"total":1,"current":0}
+{"_e":"metro:bundling:progress","_t":1790096221525,"id":"2","progress":0,"total":1,"current":0}
+{"_e":"metro:bundling:progress","_t":1790096221526,"id":"3","progress":0,"total":1,"current":0}
+{"_e":"metro:bundling:progress","_t":1790096221626,"id":"2","progress":0,"total":1,"current":0}
+{"_e":"metro:bundling:progress","_t":1790096221626,"id":"3","progress":0.1701902863553682,"total":303,"current":125}
+{"_e":"metro:bundling:progress","_t":1790096221725,"id":"2","progress":0,"total":1,"current":0}
+{"_e":"metro:bundling:progress","_t":1790096221725,"id":"3","progress":0.48523605233215894,"total":557,"current":388}
+{"_e":"metro:bundling:progress","_t":1790096221825,"id":"2","progress":0.7768331394457519,"total":666,"current":587}
+{"_e":"metro:bundling:progress","_t":1790096221825,"id":"3","progress":0.48523605233215894,"total":557,"current":388}
+{"_e":"metro:bundling:progress","_t":1790096221925,"id":"2","progress":0.7768331394457519,"total":666,"current":587}
+{"_e":"metro:bundling:progress","_t":1790096221925,"id":"3","progress":0.9571784636719701,"total":924,"current":904}
+{"_e":"metro:bundling:done","_t":1790096221970,"id":"3","total":924,"ms":445.207958}
+{"_e":"metro:bundling:progress","_t":1790096221970,"id":"2","progress":0.7768331394457519,"total":666,"current":587}
+{"_e":"metro:bundling:progress","_t":1790096222123,"id":"2","progress":0.962267573696145,"total":945,"current":927}
+{"_e":"metro:bundling:done","_t":1790096222141,"id":"2","total":945,"ms":617.262875}
+{"_e":"metro:bundling:started","_t":1790096222172,"id":"4","platform":"web","environment":null,"entry":"node_modules/expo-router/entry.js"}
+{"_e":"metro:bundling:progress","_t":1790096222172,"id":"4","progress":0,"total":1,"current":0}
+{"_e":"metro:bundling:progress","_t":1790096222227,"id":"4","progress":0.3875268628568922,"total":453,"current":282}
+{"_e":"metro:bundling:done","_t":1790096222323,"id":"4","total":453,"ms":151.406792}
+{"_e":"metro:client_log","_t":1790096222486,"level":"log","data":["Running application \"main\" with appParams:\n","{\"hydrate\": undefined, \"rootTag\": \"#root\"}","\nDevelopment-level warnings: ON.\nPerformance optimizations: OFF."]}
+{"_e":"metro:client_log","_t":1790096236465,"level":"warn","data":["Image: style.resizeMode is deprecated. Please use props.resizeMode."]}
+{"_e":"metro:client_log","_t":1790096671986,"level":"warn","data":["Route \"./home.tsx\" is missing the required default export. Ensure a React component is exported as default."]}
+{"_e":"metro:bundling:failed","_t":1790097079449,"id":null,"message":"Unable to resolve \"assets/images/expo-badge.png\" from \"src/app/home.tsx\"\n> 1 | import image from 'assets/images/expo-badge.png';\n    |                    ^\n  2 | import {View, Text, Image, StyleSheet} from 'react-native';\n  3 |\n  4 | export default function HomeScreen() {","importStack":"\u001b[1mImport stack:\u001b[22m\n\n\u001b[90m \u001b[39msrc/app/home.tsx\n\u001b[90m |\u001b[39m \u001b[36mimport\u001b[39m \u001b[32m\"assets/images/expo-badge.png\"\u001b[39m\n\n\u001b[90m \u001b[39msrc/app\u001b[2m (require.context)\u001b[22m\n","filename":null,"targetModuleName":"assets/images/expo-badge.png","originModulePath":"src/app/home.tsx"}
+{"_e":"metro:client_log","_t":1790097079452,"level":"error","data":["[UnableToResolveError: Unable to resolve module assets/images/expo-badge.png from /Users/nitish/Documents/GitHub/Echo/src/app/home.tsx: assets/images/expo-badge.png could not be found within the project or in these directories:\n  node_modules\n> 1 | import image from 'assets/images/expo-badge.png';\n    |                    ^\n  2 | import {View, Text, Image, StyleSheet} from 'react-native';\n  3 |\n  4 | export default function HomeScreen() {]"]}
+{"_e":"metro:bundling:failed","_t":1790097080388,"id":null,"message":"Unable to resolve \"assets/images/expo-badge.png\" from \"src/app/home.tsx\"\n> 1 | import image from 'assets/images/expo-badge.png';\n    |                    ^\n  2 | import {View, Text, Image, StyleSheet} from 'react-native';\n  3 |\n  4 | export default function HomeScreen() {","importStack":"\u001b[1mImport stack:\u001b[22m\n\n\u001b[90m \u001b[39msrc/app/home.tsx\n\u001b[90m |\u001b[39m \u001b[36mimport\u001b[39m \u001b[32m\"assets/images/expo-badge.png\"\u001b[39m\n\n\u001b[90m \u001b[39msrc/app\u001b[2m (require.context)\u001b[22m\n","filename":null,"targetModuleName":"assets/images/expo-badge.png","originModulePath":"src/app/home.tsx"}
+{"_e":"metro:client_log","_t":1790097080392,"level":"error","data":["[UnableToResolveError: Unable to resolve module assets/images/expo-badge.png from /Users/nitish/Documents/GitHub/Echo/src/app/home.tsx: assets/images/expo-badge.png could not be found within the project or in these directories:\n  node_modules\n> 1 | import image from 'assets/images/expo-badge.png';\n    |                    ^\n  2 | import {View, Text, Image, StyleSheet} from 'react-native';\n  3 |\n  4 | export default function HomeScreen() {]"]}
+{"_e":"metro:bundling:failed","_t":1790097701788,"id":null,"message":"Unable to resolve \"./assets/images/expo-badge.png\" from \"src/app/home.tsx\"\n> 1 | import expo from './assets/images/expo-badge.png';\n    |                   ^\n  2 | import {View, Text, Image, StyleSheet} from 'react-native';\n  3 |\n  4 | export default function HomeScreen() {","importStack":"\u001b[1mImport stack:\u001b[22m\n\n\u001b[90m \u001b[39msrc/app/home.tsx\n\u001b[90m |\u001b[39m \u001b[36mimport\u001b[39m \u001b[32m\"./assets/images/expo-badge.png\"\u001b[39m\n\n\u001b[90m \u001b[39msrc/app\u001b[2m (require.context)\u001b[22m\n","filename":null,"targetModuleName":"./assets/images/expo-badge.png","originModulePath":"src/app/home.tsx"}
+{"_e":"metro:bundling:failed","_t":1790097702753,"id":null,"message":"Unable to resolve \"./assets/images/expo-badge.png\" from \"src/app/home.tsx\"\n> 1 | import expo from './assets/images/expo-badge.png';\n    |                   ^\n  2 | import {View, Text, Image, StyleSheet} from 'react-native';\n  3 |\n  4 | export default function HomeScreen() {","importStack":"\u001b[1mImport stack:\u001b[22m\n\n\u001b[90m \u001b[39msrc/app/home.tsx\n\u001b[90m |\u001b[39m \u001b[36mimport\u001b[39m \u001b[32m\"./assets/images/expo-badge.png\"\u001b[39m\n\n\u001b[90m \u001b[39msrc/app\u001b[2m (require.context)\u001b[22m\n","filename":null,"targetModuleName":"./assets/images/expo-badge.png","originModulePath":"src/app/home.tsx"}
+{"_e":"metro:client_log","_t":1790097861255,"level":"error","data":["[UnableToResolveError: Unable to resolve module ./assets/images/expo-badge.png from /Users/nitish/Documents/GitHub/Echo/src/app/home.tsx: \n\nNone of these files exist:\n  * expo-badge.png\n  * src/app/assets/images/expo-badge.png\n> 1 | import expo from './assets/images/expo-badge.png';\n    |                   ^\n  2 | import {View, Text, Image, StyleSheet} from 'react-native';\n  3 |\n  4 | export default function HomeScreen() {]"]}
+{"_e":"metro:client_log","_t":1790097861256,"level":"error","data":["[UnableToResolveError: Unable to resolve module ./assets/images/expo-badge.png from /Users/nitish/Documents/GitHub/Echo/src/app/home.tsx: \n\nNone of these files exist:\n  * expo-badge.png\n  * src/app/assets/images/expo-badge.png\n> 1 | import expo from './assets/images/expo-badge.png';\n    |                   ^\n  2 | import {View, Text, Image, StyleSheet} from 'react-native';\n  3 |\n  4 | export default function HomeScreen() {]"]}
+{"_e":"metro:bundling:started","_t":1790097890110,"id":"f","platform":"web","environment":null,"entry":"node_modules/expo-router/entry.js"}
+{"_e":"metro:bundling:progress","_t":1790097890110,"id":"f","progress":0,"total":1,"current":0}
+{"_e":"metro:bundling:started","_t":1790097890110,"id":"g","platform":"web","environment":"node","entry":"node_modules/expo/node_modules/@expo/cli/node_modules/@expo/router-server/node/render.js"}
+{"_e":"metro:bundling:progress","_t":1790097890110,"id":"f","progress":0,"total":1,"current":0}
+{"_e":"metro:bundling:progress","_t":1790097890110,"id":"g","progress":0,"total":1,"current":0}
+{"_e":"metro:bundling:progress","_t":1790097890117,"id":"f","progress":0,"total":1,"current":0}
+{"_e":"metro:bundling:progress","_t":1790097890117,"id":"g","progress":0,"total":1,"current":0}
+{"_e":"metro:bundling:done","_t":1790097890215,"id":"g","total":1,"ms":104.550083}
+{"_e":"metro:bundling:progress","_t":1790097890215,"id":"f","progress":0,"total":1,"current":0}
+{"_e":"metro:bundling:progress","_t":1790097890365,"id":"f","progress":0,"total":1,"current":0}
+{"_e":"metro:bundling:done","_t":1790097890368,"id":"f","total":1,"ms":258.142583}
+{"_e":"metro:bundling:started","_t":1790097890381,"id":"h","platform":"web","environment":null,"entry":"node_modules/expo-router/entry.js"}
+{"_e":"metro:bundling:progress","_t":1790097890381,"id":"h","progress":0,"total":1,"current":0}
+{"_e":"metro:bundling:done","_t":1790097890414,"id":"h","total":1,"ms":32.63525}
+{"_e":"metro:client_log","_t":1790097890540,"level":"log","data":["Running application \"main\" with appParams:\n","{\"hydrate\": undefined, \"rootTag\": \"#root\"}","\nDevelopment-level warnings: ON.\nPerformance optimizations: OFF."]}
+{"_e":"metro:bundling:started","_t":1790097940491,"id":"n","platform":"web","environment":null,"entry":"node_modules/expo-router/entry.js"}
+{"_e":"metro:bundling:progress","_t":1790097940491,"id":"n","progress":0,"total":1,"current":0}
+{"_e":"metro:bundling:started","_t":1790097940491,"id":"o","platform":"web","environment":"node","entry":"node_modules/expo/node_modules/@expo/cli/node_modules/@expo/router-server/node/render.js"}
+{"_e":"metro:bundling:progress","_t":1790097940491,"id":"n","progress":0,"total":1,"current":0}
+{"_e":"metro:bundling:progress","_t":1790097940491,"id":"o","progress":0,"total":1,"current":0}
+{"_e":"metro:bundling:progress","_t":1790097940493,"id":"n","progress":0,"total":1,"current":0}
+{"_e":"metro:bundling:progress","_t":1790097940493,"id":"o","progress":0,"total":1,"current":0}
+{"_e":"metro:bundling:done","_t":1790097940543,"id":"o","total":1,"ms":52.305125}
+{"_e":"metro:bundling:progress","_t":1790097940543,"id":"n","progress":0,"total":1,"current":0}
+{"_e":"metro:bundling:progress","_t":1790097940694,"id":"n","progress":0,"total":1,"current":0}
+{"_e":"metro:bundling:done","_t":1790097940695,"id":"n","total":1,"ms":204.29075}
+{"_e":"metro:bundling:started","_t":1790097940707,"id":"p","platform":"web","environment":null,"entry":"node_modules/expo-router/entry.js"}
+{"_e":"metro:bundling:progress","_t":1790097940707,"id":"p","progress":0,"total":1,"current":0}
+{"_e":"metro:bundling:done","_t":1790097940736,"id":"p","total":1,"ms":28.637458}
+{"_e":"metro:client_log","_t":1790097940877,"level":"log","data":["Running application \"main\" with appParams:\n","{\"hydrate\": undefined, \"rootTag\": \"#root\"}","\nDevelopment-level warnings: ON.\nPerformance optimizations: OFF."]}
