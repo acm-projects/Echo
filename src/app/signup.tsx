@@ -118,7 +118,7 @@ export default function LoginScreen() {
         </View>
 
         <View style={styles.inputGroup}>
-          <Text style={styles.label}>Password</Text>
+          <Text style={styles.label}>Confirm Password</Text>
           <View style={styles.passwordRow}>
             <TextInput
               value={confirmPassword}
