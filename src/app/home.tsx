@@ -1,4 +1,5 @@
 import expo from '@/assets/images/icon.png';
+import {BottomNavBar} from '../../components/NavBar';
 import {View, Text, Image, StyleSheet} from 'react-native';
 import { supabase } from '../../lib/supabase';
 import { useEffect, useState } from 'react';
@@ -26,7 +27,9 @@ export default function HomeScreen() {
           <Image source={expo} style={styles.image} />
           <Text style={styles.text}>Welcome {username !== null ? username : 'User'} to Echo and Expo!</Text>
           <BookCard title="The Great Gatsby" author="F. Scott Fitzgerald" coverImage="https://images-na.ssl-images-amazon.com/images/I/81af+MCATTL.jpg" progress={150} totalTime={300} />
+          <BottomNavBar currentScreen="library" />
       </View>
+      
       
   );
 }

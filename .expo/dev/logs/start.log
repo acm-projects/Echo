@@ -1251,3 +1251,68 @@
 {"_e":"metro:client_log","_t":1790213390419,"level":"log","data":["Running application \"main\" with appParams:\n","{\"hydrate\": undefined, \"rootTag\": \"#root\"}","\nDevelopment-level warnings: ON.\nPerformance optimizations: OFF."]}
 {"_e":"metro:client_log","_t":1790213390431,"level":"warn","data":["\"shadow*\" style props are deprecated. Use \"boxShadow\"."]}
 {"_e":"metro:client_log","_t":1790213390442,"level":"warn","data":["[Layout children]: No route named \"(tabs)\" exists in nested children:","[\"home\", \"index\", \"login\", \"signup\"]"]}
+{"_e":"metro:client_log","_t":1790214621752,"level":"warn","data":["Image: style.resizeMode is deprecated. Please use props.resizeMode."]}
+{"_e":"metro:client_log","_t":1790214623725,"level":"warn","data":["[Layout children]: No route named \"(tabs)\" exists in nested children:","[\"home\", \"index\", \"login\", \"signup\"]"]}
+{"_e":"metro:client_log","_t":1790214739954,"level":"warn","data":["[Layout children]: No route named \"(tabs)\" exists in nested children:","[\"home\", \"index\", \"login\", \"signup\"]"]}
+{"_e":"root:init","_t":1790457647737,"format":"v0-jsonl","version":"57.0.26"}
+{"_e":"env:mode","_t":1790457647738,"nodeEnv":"development","babelEnv":"development","mode":"development"}
+{"_e":"env:load","_t":1790457647739,"mode":"development","files":["../../../.env"],"env":{"EXPO_PUBLIC_SUPABASE_ANON_KEY":"sb_publishable_YMQMKAQcDPX7Jx37Qb9cwA_4OWTxTx4","EXPO_PUBLIC_SUPABASE_URL":"https://pbdmireqwryictofgatk.supabase.co","SUPABASE_JWKS_URL":"https://pbdmireqwryictofgatk.supabase.co/auth/v1/.well-known/jwks.json","SUPABASE_PUBLISHABLE_KEY":"sb_publishable_YMQMKAQcDPX7Jx37Qb9cwA_4OWTxTx4","SUPABASE_URL":"https://pbdmireqwryictofgatk.supabase.co"}}
+{"_e":"devserver:start","_t":1790457648193,"mode":"development","web":true,"baseUrl":"","asyncRoutes":false,"routerRoot":"../../../src/app","serverComponents":false,"serverActions":false,"serverRendering":true,"apiRoutes":false,"exporting":false}
+{"_e":"metro:config","_t":1790457648377,"serverRoot":"../../..","projectRoot":"../../..","exporting":false,"flags":{"autolinkingModuleResolution":false,"serverActions":false,"serverComponents":false,"reactCompiler":true,"optimizeGraph":false,"treeshaking":false,"logbox":false}}
+{"_e":"expo:dev-tools-plugin:load","_t":1790457648483,"plugins":[]}
+{"_e":"metro:instantiate","_t":1790457648789,"atlas":false,"workers":7,"host":"::","port":8081}
+{"_e":"metro:bundling:started","_t":1790457653253,"id":"2","platform":"web","environment":null,"entry":"node_modules/expo-router/entry.js"}
+{"_e":"metro:bundling:progress","_t":1790457653254,"id":"2","progress":0,"total":1,"current":0}
+{"_e":"metro:bundling:started","_t":1790457653254,"id":"3","platform":"web","environment":"node","entry":"node_modules/expo/node_modules/@expo/cli/node_modules/@expo/router-server/node/render.js"}
+{"_e":"metro:bundling:progress","_t":1790457653254,"id":"2","progress":0,"total":1,"current":0}
+{"_e":"metro:bundling:progress","_t":1790457653254,"id":"3","progress":0,"total":1,"current":0}
+{"_e":"metro:bundling:progress","_t":1790457653255,"id":"2","progress":0,"total":1,"current":0}
+{"_e":"metro:bundling:progress","_t":1790457653255,"id":"3","progress":0,"total":1,"current":0}
+{"_e":"metro:bundling:progress","_t":1790457653355,"id":"2","progress":0,"total":1,"current":0}
+{"_e":"metro:bundling:progress","_t":1790457653355,"id":"3","progress":0.0856632956573468,"total":205,"current":60}
+{"_e":"metro:bundling:progress","_t":1790457653455,"id":"2","progress":0.42487174023504737,"total":494,"current":322}
+{"_e":"metro:bundling:progress","_t":1790457653455,"id":"3","progress":0.0856632956573468,"total":205,"current":60}
+{"_e":"metro:bundling:progress","_t":1790457653555,"id":"2","progress":0.42487174023504737,"total":494,"current":322}
+{"_e":"metro:bundling:progress","_t":1790457653555,"id":"3","progress":0.6542294378725318,"total":701,"current":567}
+{"_e":"metro:bundling:progress","_t":1790457653655,"id":"2","progress":0.42487174023504737,"total":494,"current":322}
+{"_e":"metro:bundling:progress","_t":1790457653655,"id":"3","progress":0.999,"total":853,"current":853}
+{"_e":"metro:bundling:progress","_t":1790457653755,"id":"2","progress":0.9880598085266592,"total":835,"current":830}
+{"_e":"metro:bundling:progress","_t":1790457653755,"id":"3","progress":0.999,"total":853,"current":853}
+{"_e":"metro:bundling:progress","_t":1790457653856,"id":"2","progress":0.9885256256612829,"total":869,"current":864}
+{"_e":"metro:bundling:progress","_t":1790457653856,"id":"3","progress":0.999,"total":853,"current":853}
+{"_e":"metro:bundling:progress","_t":1790457653956,"id":"2","progress":0.9885256256612829,"total":883,"current":873}
+{"_e":"metro:bundling:progress","_t":1790457653956,"id":"3","progress":0.999,"total":853,"current":853}
+{"_e":"metro:bundling:progress","_t":1790457654056,"id":"2","progress":0.9885256256612829,"total":883,"current":873}
+{"_e":"metro:bundling:progress","_t":1790457654056,"id":"3","progress":0.999,"total":901,"current":889}
+{"_e":"metro:bundling:progress","_t":1790457654156,"id":"2","progress":0.9885256256612829,"total":924,"current":911}
+{"_e":"metro:bundling:progress","_t":1790457654156,"id":"3","progress":0.999,"total":901,"current":889}
+{"_e":"metro:bundling:progress","_t":1790457654256,"id":"2","progress":0.9885256256612829,"total":924,"current":911}
+{"_e":"metro:bundling:progress","_t":1790457654256,"id":"3","progress":0.999,"total":922,"current":904}
+{"_e":"metro:bundling:progress","_t":1790457654359,"id":"2","progress":0.9885256256612829,"total":924,"current":911}
+{"_e":"metro:bundling:progress","_t":1790457654359,"id":"3","progress":0.999,"total":929,"current":917}
+{"_e":"metro:bundling:progress","_t":1790457654462,"id":"2","progress":0.9885256256612829,"total":943,"current":929}
+{"_e":"metro:bundling:progress","_t":1790457654462,"id":"3","progress":0.999,"total":929,"current":917}
+{"_e":"metro:bundling:progress","_t":1790457654562,"id":"2","progress":0.9885256256612829,"total":958,"current":949}
+{"_e":"metro:bundling:progress","_t":1790457654562,"id":"3","progress":0.999,"total":929,"current":917}
+{"_e":"metro:bundling:done","_t":1790457654660,"id":"3","total":929,"ms":1406.400084}
+{"_e":"metro:bundling:progress","_t":1790457654661,"id":"2","progress":0.9885256256612829,"total":958,"current":949}
+{"_e":"metro:bundling:progress","_t":1790457654847,"id":"2","progress":0.9958376736111111,"total":960,"current":958}
+{"_e":"metro:bundling:done","_t":1790457654897,"id":"2","total":960,"ms":1643.893833}
+{"_e":"metro:bundling:started","_t":1790457654911,"id":"4","platform":"web","environment":null,"entry":"node_modules/expo-router/entry.js"}
+{"_e":"metro:bundling:progress","_t":1790457654911,"id":"4","progress":0,"total":1,"current":0}
+{"_e":"metro:bundling:progress","_t":1790457654947,"id":"4","progress":0.18589844570468392,"total":276,"current":119}
+{"_e":"metro:bundling:progress","_t":1790457655047,"id":"4","progress":0.8090351400498819,"total":746,"current":671}
+{"_e":"metro:bundling:progress","_t":1790457655147,"id":"4","progress":0.975078861253329,"total":957,"current":945}
+{"_e":"metro:bundling:progress","_t":1790457655247,"id":"4","progress":0.9979263872867202,"total":964,"current":963}
+{"_e":"metro:bundling:done","_t":1790457655283,"id":"4","total":964,"ms":371.534709}
+{"_e":"metro:client_log","_t":1790457655393,"level":"log","data":["Running application \"main\" with appParams:\n","{\"hydrate\": undefined, \"rootTag\": \"#root\"}","\nDevelopment-level warnings: ON.\nPerformance optimizations: OFF."]}
+{"_e":"metro:client_log","_t":1790457655405,"level":"warn","data":["\"shadow*\" style props are deprecated. Use \"boxShadow\"."]}
+{"_e":"metro:client_log","_t":1790457655417,"level":"warn","data":["[Layout children]: No route named \"(tabs)\" exists in nested children:","[\"home\", \"index\", \"login\", \"signup\"]"]}
+{"_e":"metro:bundling:started","_t":1790457792200,"id":"7","platform":"web","environment":null,"entry":"node_modules/expo-router/entry.js"}
+{"_e":"metro:bundling:progress","_t":1790457792200,"id":"7","progress":0,"total":1,"current":0}
+{"_e":"metro:bundling:started","_t":1790457792200,"id":"8","platform":"web","environment":"node","entry":"node_modules/expo/node_modules/@expo/cli/node_modules/@expo/router-server/node/render.js"}
+{"_e":"metro:bundling:progress","_t":1790457792200,"id":"7","progress":0,"total":1,"current":0}
+{"_e":"metro:bundling:progress","_t":1790457792200,"id":"8","progress":0,"total":1,"current":0}
+{"_e":"metro:bundling:done","_t":1790457792222,"id":"8","total":1,"ms":22.143542}
+{"_e":"metro:bundling:progress","_t":1790457792222,"id":"7","progress":0,"total":1,"current":0}
+{"_e":"metro:bundling:done","_t":1790457792312,"id":"7","total":1,"ms":112.145083}
