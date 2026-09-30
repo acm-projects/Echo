@@ -1,9 +1,7 @@
-import expo from '@/assets/images/icon.png';
-import {BottomNavBar} from '../../components/NavBar';
-import {View, Text, Image, StyleSheet} from 'react-native';
+import { View, Text, StyleSheet } from 'react-native';
 import { supabase } from '../../lib/supabase';
 import { useEffect, useState } from 'react';
-import BookCard from '../../components/BookCard';
+import { BookCard } from './components/BookCard';
 
 export default function HomeScreen() {
     const [username, setUsername] = useState<string | null>(null);
@@ -24,10 +22,8 @@ export default function HomeScreen() {
     }, [])
   return (
     <View style={styles.container}>
-          <Image source={expo} style={styles.image} />
           <Text style={styles.text}>Welcome {username !== null ? username : 'User'} to Echo and Expo!</Text>
-          <BookCard title="The Great Gatsby" author="F. Scott Fitzgerald" coverImage="https://images-na.ssl-images-amazon.com/images/I/81af+MCATTL.jpg" progress={150} totalTime={300} />
-          <BottomNavBar currentScreen="library" />
+          <BookCard title="The Great Gatsby" author="F. Scott Fitzgerald" tint={['#2F6B3A', '#10281A']} progress={0.5} />
       </View>
       
       
@@ -41,11 +37,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     backgroundColor: '#fff',
-  },
-  image: {
-    width: 200,
-    height: 200,
-    marginBottom: 20,
   },
   text: {
     fontSize: 24,
