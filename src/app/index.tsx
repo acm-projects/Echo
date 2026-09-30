@@ -7,7 +7,7 @@ export default function Index() {
   const router = useRouter();
   
   useEffect(() => {
-    router.push("/login");
+    router.replace("/Test/welcome");
   }, []);
 
 
