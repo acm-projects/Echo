@@ -5,7 +5,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Screen } from '../components/Screen';
 import { FormField } from '../components/FormField';
 import { GradientButton } from '../components/GradientButton';
-import { colors, fonts, type } from '../theme';
+import { colors, fonts, type } from '../../../theme';
 import { supabase } from '../../../lib/supabase';
 import * as WebBrowser from 'expo-web-browser';
 import { Alert } from 'react-native';

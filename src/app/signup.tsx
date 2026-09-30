@@ -28,7 +28,7 @@ export default function LoginScreen() {
   })
   console.log('signup result:', { data, error })
   if (error) return
-  router.push('/login')
+  router.replace('/Test/login')
 }
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');

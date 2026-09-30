@@ -1,7 +1,7 @@
 import { ReactNode } from 'react';
 import { StyleSheet, Text, TextInput, TextInputProps, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { colors, fonts, type } from '../theme';
+import { colors, fonts, type } from '../../../theme';
 
 type Props = TextInputProps & { label: string; icon: keyof typeof Ionicons.glyphMap; right?: ReactNode };
 

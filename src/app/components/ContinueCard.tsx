@@ -2,7 +2,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { ProgressBar } from './ProgressBar';
-import { colors, gradients, type } from '../theme';
+import { colors, gradients, type } from '../../../theme';
 
 type Props = { title: string; chapter: string; timeLeft: string; progress: number; onPress?: () => void };
 

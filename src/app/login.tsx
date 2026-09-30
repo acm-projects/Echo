@@ -24,7 +24,7 @@ export default function LoginScreen() {
     const { error } = await supabase.auth.signInWithPassword({ email, password })
     if (error) {Alert.alert('Login failed', error.message)
     } else {
-      router.push('../home');
+      router.replace('/home');
     }
 
   };
@@ -106,7 +106,7 @@ export default function LoginScreen() {
         </TouchableOpacity>
         <TouchableOpacity
           style={styles.secondaryAction}
-          onPress={() => router.push('../signup')}
+          onPress={() => router.push('/signup')}
         >
           <Text style={styles.secondaryText}>Don't have an account? Sign Up</Text>
         </TouchableOpacity>

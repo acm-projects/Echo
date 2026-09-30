@@ -3,7 +3,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { Screen } from '../components/Screen';
 import { GradientButton } from '../components/GradientButton';
-import { colors, fonts, type } from '../theme';
+import { colors, fonts, type } from '../../../theme';
 
 const FEATURES: { icon: keyof typeof Ionicons.glyphMap; label: string }[] = [
   { icon: 'sparkles-outline', label: 'Narration' },

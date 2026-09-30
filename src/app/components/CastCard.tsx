@@ -1,6 +1,6 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { colors, fonts, type } from '..//theme';
+import { colors, fonts, type } from '../../../theme';
 
 type Props = { name: string; role: string; voice: string; roleColor?: string; avatarColor?: string; onPlay?: () => void };
 

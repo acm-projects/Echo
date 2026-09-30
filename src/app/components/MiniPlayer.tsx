@@ -2,7 +2,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { ProgressBar } from './ProgressBar';
-import { colors, type } from '../theme';
+import { colors, type } from '../../../theme';
 
 type Props = {
   title: string; chapter: string; progress: number; isPlaying: boolean;

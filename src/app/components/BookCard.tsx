@@ -1,7 +1,7 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { ProgressBar } from './ProgressBar';
-import { colors, fonts, type } from '../theme';
+import { colors, fonts, type } from '../../../theme';
 
 type Props = { title: string; author: string; progress?: number; tint: readonly [string, string]; onPress?: () => void };
 

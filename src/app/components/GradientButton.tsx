@@ -1,7 +1,7 @@
 import { Pressable, StyleProp, StyleSheet, Text, ViewStyle } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import { colors, fonts, gradients } from '../theme';
+import { colors, fonts, gradients } from '../../../theme';
 
 type Props = {
   title: string;

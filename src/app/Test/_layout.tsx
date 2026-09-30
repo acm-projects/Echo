@@ -5,7 +5,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MiniPlayer } from '../components/MiniPlayer';
-import { colors, fonts, gradients } from '../theme';
+import { colors, fonts, gradients } from '../../../theme';
 
 type Icon = keyof typeof Ionicons.glyphMap;
 const TABS: Record<string, { label: string; icon: Icon }> = {

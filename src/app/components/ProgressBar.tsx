@@ -1,5 +1,5 @@
 import { View } from 'react-native';
-import { colors } from '../theme';
+import { colors } from '../../../theme';
 
 export function ProgressBar({ value, height = 4 }: { value: number; height?: number }) {
   return (

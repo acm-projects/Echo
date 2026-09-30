@@ -4,7 +4,7 @@ import { Screen } from '../components/Screen';
 import { ContinueCard } from '../components/ContinueCard';
 import { BookCard } from '../components/BookCard';
 import { CastCard } from '../components/CastCard';
-import { colors, fonts, type } from '../theme';
+import { colors, fonts, type } from '../../../theme';
 
 const BOOKS = [
   { id: '1', title: 'A Season of Ash', author: 'Mara Vey', progress: 0.15, tint: ['#2F6B3A', '#10281A'] as const },
