@@ -48,7 +48,7 @@ export default function Login() {
         <Text style={type.meta}>or</Text>
         <View style={{ flex: 1, height: 1, backgroundColor: colors.border }} />
       </View>
-      <GradientButton title="New here? Create account" variant="outline" onPress={() => router.push('/signup')} />
+      <GradientButton title="New here? Create account" variant="outline" onPress={() => router.push('./signup')} />
     </Screen>
   );
 }

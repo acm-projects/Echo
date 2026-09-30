@@ -16,7 +16,7 @@ export default function Welcome() {
       </View>
       <View style={{ gap: 12, paddingBottom: 40 }}>
         <GradientButton title="LOG IN" onPress={() => router.push('/Test/login')} />
-        <GradientButton title="Create account" variant="outline" onPress={() => router.push('/signup')} />
+        <GradientButton title="Create account" variant="outline" onPress={() => router.push('./signup')} />
       </View>
     </Screen>
   );
