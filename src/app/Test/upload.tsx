@@ -1,67 +1,315 @@
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
+
 import { Screen } from '../components/Screen';
-import { GradientButton } from '../components/GradientButton';
 import { colors, fonts, type } from '../../../theme';
 
-const FEATURES: { icon: keyof typeof Ionicons.glyphMap; label: string }[] = [
-  { icon: 'sparkles-outline', label: 'Narration' },
-  { icon: 'book-outline', label: 'Chapters' },
-  { icon: 'people-outline', label: 'Characters' },
+const PUBLIC_DOMAIN_BOOKS = [
+  {
+    id: 'pride-prejudice',
+    title: 'Pride and Prejudice',
+    author: 'Jane Austen',
+    year: '1813',
+    accent: '#7D5C75',
+  },
+  {
+    id: 'frankenstein',
+    title: 'Frankenstein',
+    author: 'Mary Shelley',
+    year: '1818',
+    accent: '#45584D',
+  },
+  {
+    id: 'dracula',
+    title: 'Dracula',
+    author: 'Bram Stoker',
+    year: '1897',
+    accent: '#603D49',
+  },
+  {
+    id: 'gatsby',
+    title: 'The Great Gatsby',
+    author: 'F. Scott Fitzgerald',
+    year: '1925',
+    accent: '#3E596A',
+  },
 ];
 
 export default function Upload() {
   return (
     <Screen>
-      <View style={s.header}>
-        <Text style={type.h1}>Upload a book</Text>
-        <Pressable style={s.help}><Ionicons name="help" size={18} color={colors.dim} /></Pressable>
-      </View>
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={s.content}
+      >
+        <View style={s.header}>
+          <View>
+            <Text style={type.h1}>Add a Book</Text>
+            <Text style={s.subtitle}>
+              Upload your own or discover something new.
+            </Text>
+          </View>
 
-      <ScrollView contentContainerStyle={s.content} showsVerticalScrollIndicator={false}>
-        <Pressable style={s.drop}>
-          <View style={s.dropIcon}><Ionicons name="cloud-upload-outline" size={28} color={colors.blue} /></View>
-          <Text style={[type.h2, { fontSize: 18 }]}>Choose a file</Text>
-          <Text style={type.meta}>PDF, EPUB, MOBI · Up to 50 MB</Text>
+          <Pressable style={s.help}>
+            <Ionicons
+              name="help"
+              size={18}
+              color={colors.dim}
+            />
+          </Pressable>
+        </View>
+
+        <Pressable style={s.uploadCard}>
+          <View style={s.plusCircle}>
+            <Ionicons
+              name="add"
+              size={38}
+              color={colors.blue}
+            />
+          </View>
+
+          <Text style={s.uploadTitle}>
+            Upload a File
+          </Text>
+
+          <Text style={s.uploadDescription}>
+            Add a book from your device
+          </Text>
+
+          <Text style={s.fileTypes}>
+            PDF · EPUB · MOBI · Up to 50 MB
+          </Text>
         </Pressable>
 
-        <View style={s.file}>
-          <Ionicons name="document-text-outline" size={24} color={colors.dim} />
-          <View style={{ flex: 1 }}>
-            <Text style={[type.title, { fontFamily: fonts.sansBold, fontSize: 15 }]}>Dune.epub</Text>
-            <Text style={type.meta}>2.4 MB · Ready to upload</Text>
+        <View style={s.sectionHeader}>
+          <View>
+            <Text style={s.sectionTitle}>
+              Public Domain
+            </Text>
+
+            <Text style={s.sectionDescription}>
+              Books ready to add to your library
+            </Text>
           </View>
-          <Pressable hitSlop={10}><Ionicons name="close" size={20} color={colors.dim} /></Pressable>
+
+          <Pressable>
+            <Text style={s.seeAll}>
+              See All
+            </Text>
+          </Pressable>
         </View>
 
-        <GradientButton title="Upload & process" icon="sparkles" style={{ marginTop: 18 }} />
-
-        {/* Secondary info: dimmed and faded out so it doesn't compete with the button */}
-        <View style={s.faded}>
-          <Text style={[type.meta, { letterSpacing: 1.2, marginBottom: 12 }]}>WHAT ECHO CREATES</Text>
-          <View style={{ flexDirection: 'row', gap: 10 }}>
-            {FEATURES.map((f) => (
-              <View key={f.label} style={s.feature}>
-                <Ionicons name={f.icon} size={20} color={colors.blue} />
-                <Text style={type.meta}>{f.label}</Text>
+        <View style={s.books}>
+          {PUBLIC_DOMAIN_BOOKS.map((book) => (
+            <Pressable
+              key={book.id}
+              style={s.bookRow}
+            >
+              <View
+                style={[
+                  s.cover,
+                  { backgroundColor: book.accent },
+                ]}
+              >
+                <Ionicons
+                  name="book-outline"
+                  size={25}
+                  color="rgba(255,255,255,0.75)"
+                />
               </View>
-            ))}
-          </View>
-          <LinearGradient pointerEvents="none" colors={['rgba(42,18,88,0)', colors.bgMid]} style={StyleSheet.absoluteFill} />
+
+              <View style={s.bookInfo}>
+                <Text
+                  style={s.bookTitle}
+                  numberOfLines={1}
+                >
+                  {book.title}
+                </Text>
+
+                <Text
+                  style={s.bookAuthor}
+                  numberOfLines={1}
+                >
+                  {book.author}
+                </Text>
+
+                <Text style={s.bookYear}>
+                  {book.year}
+                </Text>
+              </View>
+
+              <Pressable
+                style={s.addBookButton}
+                hitSlop={8}
+              >
+                <Ionicons
+                  name="add"
+                  size={24}
+                  color={colors.text}
+                />
+              </Pressable>
+            </Pressable>
+          ))}
         </View>
+
       </ScrollView>
     </Screen>
   );
 }
 
 const s = StyleSheet.create({
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingTop: 8 },
-  help: { width: 38, height: 38, borderRadius: 19, backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border, alignItems: 'center', justifyContent: 'center' },
-  content: { padding: 20, paddingBottom: 40 },
-  drop: { height: 190, borderRadius: 26, borderWidth: 1.5, borderStyle: 'dashed', borderColor: 'rgba(214,123,176,0.4)', backgroundColor: colors.card, alignItems: 'center', justifyContent: 'center', gap: 8 },
-  dropIcon: { width: 60, height: 60, borderRadius: 30, backgroundColor: 'rgba(127,168,230,0.15)', alignItems: 'center', justifyContent: 'center', marginBottom: 4 },
-  file: { flexDirection: 'row', alignItems: 'center', gap: 14, marginTop: 14, padding: 14, borderRadius: 20, backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border },
-  faded: { marginTop: 36, opacity: 0.5, overflow: 'hidden', paddingBottom: 24 },
-  feature: { flex: 1, alignItems: 'center', gap: 8, paddingVertical: 14, borderRadius: 18, backgroundColor: colors.card },
+  content: {
+    padding: 20,
+    paddingBottom: 150,
+  },
+
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 24,
+  },
+
+  subtitle: {
+    ...type.body,
+    marginTop: 5,
+    color: colors.dim,
+  },
+
+  help: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: colors.card,
+    borderWidth: 1,
+    borderColor: colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  uploadCard: {
+    minHeight: 200,
+    borderRadius: 26,
+    borderWidth: 1.5,
+    borderStyle: 'dashed',
+    borderColor: 'rgba(214,123,176,0.4)',
+    backgroundColor: colors.card,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 24,
+  },
+
+  plusCircle: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: 'rgba(127,168,230,0.14)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 15,
+  },
+
+  uploadTitle: {
+    fontFamily: fonts.sansBold,
+    color: colors.text,
+    fontSize: 19,
+  },
+
+  uploadDescription: {
+    ...type.body,
+    color: colors.dim,
+    marginTop: 5,
+  },
+
+  fileTypes: {
+    ...type.meta,
+    color: colors.faint,
+    marginTop: 8,
+  },
+
+  sectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-end',
+    marginTop: 34,
+    marginBottom: 14,
+  },
+
+  sectionTitle: {
+    fontFamily: fonts.sansBold,
+    fontSize: 21,
+    color: colors.text,
+  },
+
+  sectionDescription: {
+    ...type.meta,
+    marginTop: 4,
+    color: colors.dim,
+  },
+
+  seeAll: {
+    fontFamily: fonts.sansBold,
+    fontSize: 13,
+    color: colors.blue,
+  },
+
+  books: {
+    gap: 10,
+  },
+
+  bookRow: {
+    minHeight: 92,
+    padding: 11,
+    borderRadius: 20,
+    backgroundColor: colors.card,
+    borderWidth: 1,
+    borderColor: colors.border,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+
+  cover: {
+    width: 54,
+    height: 70,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  bookInfo: {
+    flex: 1,
+    marginLeft: 14,
+  },
+
+  bookTitle: {
+    fontFamily: fonts.sansBold,
+    color: colors.text,
+    fontSize: 15,
+  },
+
+  bookAuthor: {
+    ...type.meta,
+    color: colors.dim,
+    marginTop: 4,
+  },
+
+  bookYear: {
+    ...type.meta,
+    color: colors.faint,
+    fontSize: 10,
+    marginTop: 4,
+  },
+
+  addBookButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  
 });
