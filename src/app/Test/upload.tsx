@@ -1,5 +1,7 @@
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View, Alert, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import * as DocumentPicker from 'expo-document-picker';
+import { useState } from 'react';
 
 import { Screen } from '../components/Screen';
 import { colors, fonts, type } from '../../../theme';
@@ -36,6 +38,32 @@ const PUBLIC_DOMAIN_BOOKS = [
 ];
 
 export default function Upload() {
+  const [processing, setProcessing] = useState(false);
+  const [selectedFile, setSelectedFile] = useState<string | null>(null);
+
+  const selectAndProcess = async () => {
+    const result = await DocumentPicker.getDocumentAsync({
+      type: ['application/pdf', 'application/epub+zip', 'text/plain', 'text/markdown', 'application/octet-stream'],
+      copyToCacheDirectory: true,
+    });
+    if (result.canceled) return;
+    const file = result.assets[0];
+    setSelectedFile(file.name);
+    setProcessing(true);
+    try {
+      const form = new FormData();
+      form.append('book', { uri: file.uri, name: file.name, type: file.mimeType ?? 'application/octet-stream' } as any);
+      const response = await fetch(`${process.env.EXPO_PUBLIC_VOICE_SERVER_URL ?? 'http://127.0.0.1:8787'}/api/books/process`, { method: 'POST', body: form });
+      const data = await response.json() as { error?: string; roster?: Array<{ name: string }> };
+      if (!response.ok) throw new Error(data.error ?? 'Book processing failed.');
+      Alert.alert('Book processed', `${data.roster?.length ?? 0} voices found. IndexTTS generated the segment audio.`);
+    } catch (error) {
+      Alert.alert('Upload failed', error instanceof Error ? error.message : 'Could not process this file.');
+    } finally {
+      setProcessing(false);
+    }
+  };
+
   return (
     <Screen>
       <ScrollView
@@ -59,7 +87,7 @@ export default function Upload() {
           </Pressable>
         </View>
 
-        <Pressable style={s.uploadCard}>
+        <Pressable style={s.uploadCard} onPress={selectAndProcess} disabled={processing}>
           <View style={s.plusCircle}>
             <Ionicons
               name="add"
@@ -69,7 +97,7 @@ export default function Upload() {
           </View>
 
           <Text style={s.uploadTitle}>
-            Upload a File
+            {processing ? 'Processing with Claude + IndexTTS...' : selectedFile ?? 'Upload a File'}
           </Text>
 
           <Text style={s.uploadDescription}>

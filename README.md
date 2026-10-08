@@ -158,7 +158,7 @@ test -f workers/indextts/checkpoints/config.yaml && echo "checkpoints present"
 npm --prefix server install
 ```
 
-The server owns `GOOGLE_API_KEY`, creates Gemini voices, starts the persistent IndexTTS worker, and serves the generated WAV back to the app. The API key is never placed in an Expo-public variable.
+The server owns `GOOGLE_API_KEY`, creates Gemini voices, starts the persistent IndexTTS worker, stitches ordered segments with ffmpeg, and serves the generated audio back to the app. The API key is never placed in an Expo-public variable.
 
 ### Start the App and Server
 

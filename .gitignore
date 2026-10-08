@@ -30,3 +30,6 @@ expo-env.d.ts
 /server/tmp/
 /server/.env
 /server/app.json
+
+# Local-only architecture and debugging notes
+/PIPELINE.local.md
