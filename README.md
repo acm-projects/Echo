@@ -89,6 +89,130 @@ Don't like a voice Echo picked? Customize it to your liking, or clone a voice sa
 - Supabase account + CLI
 - AWS
 
+## Local Voice Pipeline Setup
+
+The current voice sample pipeline uses the Expo app, a Node server, Gemini 3.8 Flash TTS for voice design, and IndexTTS 2.5 for local CPU narration.
+
+### Prerequisites
+
+- Node.js 22.13 or newer
+- Python 3.10 or 3.11 (IndexTTS does not support Python 3.12+)
+- Git
+- `uv` Python environment manager
+- `ffmpeg` for later audio stitching
+- A Google AI Studio API key with Gemini TTS access
+
+Install `uv` and `ffmpeg` on macOS:
+
+```bash
+brew install uv ffmpeg
+```
+
+On Windows, install `uv` and `ffmpeg` using their official installers, then reopen the terminal.
+
+### Configure Environment
+
+Create a local `.env` file at the repository root. It is ignored by Git:
+
+```env
+GOOGLE_API_KEY=your_google_api_key
+EXPO_PUBLIC_SUPABASE_URL=your_supabase_url
+EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_key
+```
+
+Do not prefix the Google key with whitespace and never commit `.env`.
+
+### Install the Expo App
+
+```bash
+npm install
+npx expo install expo-audio expo-document-picker expo-file-system
+```
+
+### Install IndexTTS and Download Weights
+
+The IndexTTS source is kept in `workers/indextts`. Its Python environment, checkpoints, generated outputs, and downloaded example audio are ignored by Git.
+
+```bash
+cd workers/indextts
+uv sync --extra webui
+uv tool install huggingface-hub
+uv run hf download IndexTeam/IndexTTS-2.5 --local-dir checkpoints
+uv run python -c "from indextts.utils.examples_downloader import ensure_examples_available; ensure_examples_available()"
+cd ../..
+```
+
+The download requires roughly 6 GB of model storage, and the complete local checkpoint directory may be larger after auxiliary models are downloaded. IndexTTS loads once and runs one job at a time on CPU. On Apple Silicon, MPS may be detected automatically; CUDA is used when available on Windows/Linux.
+
+Verify the installation:
+
+```bash
+workers/indextts/.venv/bin/python --version
+workers/indextts/.venv/bin/python -c "import sys; sys.path.insert(0, 'workers/indextts'); from indextts.infer_v2_5 import IndexTTS2; print('IndexTTS ready')"
+test -f workers/indextts/checkpoints/config.yaml && echo "checkpoints present"
+```
+
+### Install the Voice Server
+
+```bash
+npm --prefix server install
+```
+
+The server owns `GOOGLE_API_KEY`, creates Gemini voices, starts the persistent IndexTTS worker, and serves the generated WAV back to the app. The API key is never placed in an Expo-public variable.
+
+### Start the App and Server
+
+Use two terminals from the repository root:
+
+Terminal 1, start the local voice server:
+
+```bash
+npm --prefix server start
+```
+
+Verify it:
+
+```bash
+curl http://127.0.0.1:8787/health
+```
+
+Terminal 2, start Expo:
+
+```bash
+npm start
+```
+
+The hidden sample page is available only by manually entering `/Test/voice-lab`. It is intentionally not linked from the tab bar.
+
+For a physical phone, set the app's server URL to a reachable computer address in `.env`:
+
+```env
+EXPO_PUBLIC_VOICE_SERVER_URL=http://YOUR_COMPUTER_LAN_IP:8787
+```
+
+The current server binds to `127.0.0.1`, which is suitable for the simulator or web on the same computer. A physical-device setup needs the server host binding and firewall configured for LAN access.
+
+### Stop and Restart
+
+Stop either process with `Ctrl+C`. If port `8787` is already occupied:
+
+```bash
+lsof -nP -iTCP:8787 -sTCP:LISTEN
+kill <PID>
+npm --prefix server start
+```
+
+### Git Safety Check
+
+Before pushing, confirm secrets, weights, virtual environments, generated bundles, and temporary audio are ignored:
+
+```bash
+git status --short
+git check-ignore -v .env workers/indextts/checkpoints/config.yaml workers/indextts/.venv server/node_modules server/tmp dist .expo
+```
+
+The IndexTTS source license is Bilibili's model license. Review it before making the repository public.
+
 ## GitHub Cheat Sheet
 
 | Command | Description |

@@ -85,7 +85,7 @@ const shelf: Book[] = [
 
 function openBook(book: Book) {
   router.push({
-    pathname: '/Test/book-details',
+    pathname: '/Test/book_details',
     params: {
       id: book.id,
       title: book.title,
@@ -318,7 +318,7 @@ const styles = StyleSheet.create({
   title: {
     color: '#FFFFFF',
     fontSize: 28,
-    fontFamily: fonts?.bold,
+    fontFamily: fonts.sansBold,
     fontWeight: '800',
   },
 
