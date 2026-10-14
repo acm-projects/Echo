@@ -52,7 +52,13 @@ export default function Upload() {
     setProcessing(true);
     try {
       const form = new FormData();
-      form.append('book', { uri: file.uri, name: file.name, type: file.mimeType ?? 'application/octet-stream' } as any);
+      // Web platform: pass the File object directly
+      // React Native: pass object with uri, name, type
+      if (file.file) {
+        form.append('book', file.file, file.name);
+      } else {
+        form.append('book', { uri: file.uri, name: file.name, type: file.mimeType ?? 'application/octet-stream' } as any);
+      }
       const response = await fetch(`${process.env.EXPO_PUBLIC_VOICE_SERVER_URL ?? 'http://127.0.0.1:8787'}/api/books/process`, { method: 'POST', body: form });
       const data = await response.json() as { error?: string; roster?: Array<{ name: string }> };
       if (!response.ok) throw new Error(data.error ?? 'Book processing failed.');

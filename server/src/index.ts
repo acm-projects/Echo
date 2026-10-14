@@ -254,7 +254,7 @@ async function stitchSegments(jobId: string, segmentPaths: string[]) {
   return { wavPath, mp3Path };
 }
 
-const app = Fastify({ logger: true, bodyLimit: 1024 * 1024 });
+const app = Fastify({ logger: true, bodyLimit: 50 * 1024 * 1024 });
 await app.register(cors, { origin: true });
 await app.register(multipart, { limits: { fileSize: 50 * 1024 * 1024, files: 1 } });
 await mkdir(TMP_ROOT, { recursive: true });
@@ -272,20 +272,26 @@ app.post('/api/books/process', async (request, reply) => {
   try {
     ensureClaudeConfiguration();
     ensureConfiguration();
+    app.log.info('Starting book processing');
     const upload = await request.file();
     if (!upload) return reply.code(400).send({ error: 'Attach a book file in the book field.' });
+    app.log.info({ filename: upload.filename }, 'File received');
     const bookText = await extractBookText(upload.filename, await upload.toBuffer());
+    app.log.info({ textLength: bookText.length }, 'Text extracted from file');
     if (bookText.length < 40) return reply.code(400).send({ error: 'The uploaded file did not contain enough readable text.' });
 
+    app.log.info('Calling Claude to extract roster');
     const roster = await claudeToolCall(
       'extract_roster',
       'Extract a stable character roster from the book excerpt. Always include Narrator. Voice descriptions must describe generic vocal traits only, never imitate a real person or celebrity.',
-      `Build a character roster for this book text. Include canonical names, aliases, and one or two sentences describing permanent vocal traits (age range, timbre, accent, pacing). Include Narrator.\n\n${bookText.slice(0, 30000)}`,
+      `Build a character roster for this book text. Include canonical names, aliases, and one or two sentences describing permanent vocal traits (age range, timbre, accent, pacing) while making sure to specify gender in these sentences based off names and context. Include Narrator.\n\n${bookText.slice(0, 30000)}`,
       rosterSchema,
     );
+    app.log.info({ characterCount: roster.characters.length }, 'Roster extracted');
 
     const chunks = [];
     for (let offset = 0; offset < bookText.length; offset += 12000) chunks.push(bookText.slice(offset, offset + 12000));
+    app.log.info({ chunkCount: chunks.length }, 'Text split into chunks');
     const allSegments: z.infer<typeof segmentsSchema>['segments'] = [];
     for (const chunk of chunks) {
       const parsed = await claudeToolCall(
@@ -296,37 +302,52 @@ app.post('/api/books/process', async (request, reply) => {
       );
       allSegments.push(...parsed.segments);
     }
+    app.log.info({ segmentCount: allSegments.length }, 'Segments extracted');
 
+    app.log.info('Getting narrator reference');
     const narratorReference = await latestNarratorReference();
     const references = new Map<string, string>([['Narrator', narratorReference]]);
     for (const character of roster.characters.filter((item) => item.name !== 'Narrator')) {
-      const voice = await generateVoicePreview({
-        voiceDescription: character.voiceDescription,
-        displayName: `Echo - ${character.name}`,
-        text: 'This is a neutral reference line for a fictional audiobook character.',
-        emotion: 'neutral',
-        languageCode: 'en-US',
-      });
-      if (!voice.sample_audio?.data || !voice.id) throw new Error(`Gemini did not return a reference for ${character.name}.`);
-      const referencePath = path.join(TMP_ROOT, `${voice.id.replace(/[^a-zA-Z0-9_-]/g, '_')}.wav`);
-      await writeFile(referencePath, Buffer.from(voice.sample_audio.data, 'base64'));
-      references.set(character.name, referencePath);
+      app.log.info({ character: character.name }, 'Generating voice preview');
+      try {
+        const voice = await generateVoicePreview({
+          voiceDescription: character.voiceDescription,
+          displayName: `Echo - ${character.name}`,
+          text: 'This is a neutral reference line for a fictional audiobook character.',
+          emotion: 'neutral',
+          languageCode: 'en-US',
+        });
+        if (!voice.sample_audio?.data || !voice.id) throw new Error(`Gemini did not return a reference for ${character.name}.`);
+        const referencePath = path.join(TMP_ROOT, `${voice.id.replace(/[^a-zA-Z0-9_-]/g, '_')}.wav`);
+        await writeFile(referencePath, Buffer.from(voice.sample_audio.data, 'base64'));
+        references.set(character.name, referencePath);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        app.log.warn({ character: character.name, error: message }, 'Voice generation blocked, using narrator voice');
+        // Skip this character - they will use the narrator's voice
+      }
     }
+    app.log.info({ referenceCount: references.size }, 'Voice references generated');
 
     const jobId = randomUUID();
+    app.log.info({ jobId, segmentCount: allSegments.length }, 'Starting IndexTTS generation');
     const outputSegments = [];
     for (const [index, segment] of allSegments.entries()) {
       const speaker = references.has(segment.speaker) ? segment.speaker : 'Narrator';
       const outputPath = await runIndexTts(references.get(speaker)!, segment.text, segment.emotion);
       outputSegments.push({ index, speaker, kind: segment.kind, text: segment.text, emotion: segment.emotion, outputPath });
     }
+    app.log.info({ generatedCount: outputSegments.length }, 'IndexTTS generation complete');
+
     const manifestPath = path.join(TMP_ROOT, `${jobId}.json`);
+    app.log.info('Stitching segments');
     const compiled = await stitchSegments(jobId, outputSegments.map((segment) => segment.outputPath));
     await writeFile(manifestPath, JSON.stringify({ jobId, roster, segments: outputSegments, compiled }, null, 2));
+    app.log.info({ jobId }, 'Book processing complete');
     return { jobId, roster, segments: outputSegments, compiled, manifestPath };
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Book processing failed.';
-    app.log.error({ error }, 'Book processing failed');
+    app.log.error({ error, message }, 'Book processing failed');
     return reply.code(400).send({ error: message });
   }
 });
