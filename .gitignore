@@ -31,21 +31,6 @@ expo-env.d.ts
 /server/.env
 /server/app.json
 
-# Model weights and large binary files
-*.pth
-*.pt
-*.ckpt
-*.bin
-*.safetensors
-*.onnx
-*.h5
-*.hdf5
-*.pb
-*.index
-*.wav
-*.mp3
-*.flac
-
 # Local-only architecture and debugging notes
 /PIPELINE.local.md
 
