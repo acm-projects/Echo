@@ -1,5 +1,5 @@
 node_modules/
-.expo/
+.expo
 dist/
 .DS_Store
 *.log
@@ -36,3 +36,31 @@ expo-env.d.ts
 
 # Supabase CLI files for your own computer
 supabase/.temp/
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.project
+.classpath
+.settings/
+
+# OS files
+Thumbs.db
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Environment and config files
+.env.local
+.env.*.local
+*.pem
+*.key
+
+# Build and test artifacts
+coverage/
+.nyc_output/
+*.tgz
+*.tar.gz
