@@ -33,3 +33,6 @@ expo-env.d.ts
 
 # Local-only architecture and debugging notes
 /PIPELINE.local.md
+
+# Supabase CLI files for your own computer
+supabase/.temp/
