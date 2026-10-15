@@ -6,3 +6,6 @@ expo-env.d.ts
 # @end expo-cli
 
 /.env
+
+# Supabase CLI files for your own computer
+supabase/.temp/
