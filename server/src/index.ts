@@ -2,7 +2,7 @@ import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import multipart from '@fastify/multipart';
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdir, readFile, writeFile, access, readdir, stat } from 'node:fs/promises';
+import { mkdir, readFile, writeFile, access, readdir, stat, rm } from 'node:fs/promises';
 import { createReadStream } from 'node:fs';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import path from 'node:path';
@@ -62,6 +62,9 @@ type PendingJob = { resolve: (path: string) => void; reject: (error: Error) => v
 let worker: ChildProcessWithoutNullStreams | undefined;
 let workerBuffer = '';
 const pending = new Map<string, PendingJob>();
+
+// Track files created for each job for cleanup
+const jobFiles = new Map<string, Set<string>>();
 
 function ensureConfiguration() {
   if (!GOOGLE_API_KEY) throw new Error('GOOGLE_API_KEY is not configured in the repository .env file.');
@@ -269,6 +272,7 @@ app.get('/health', async () => ({
 }));
 
 app.post('/api/books/process', async (request, reply) => {
+  let jobId: string | undefined;
   try {
     ensureClaudeConfiguration();
     ensureConfiguration();
@@ -277,8 +281,9 @@ app.post('/api/books/process', async (request, reply) => {
     if (!upload) return reply.code(400).send({ error: 'Attach a book file in the book field.' });
     app.log.info({ filename: upload.filename }, 'File received');
     const bookText = await extractBookText(upload.filename, await upload.toBuffer());
-    app.log.info({ textLength: bookText.length }, 'Text extracted from file');
-    if (bookText.length < 40) return reply.code(400).send({ error: 'The uploaded file did not contain enough readable text.' });
+    const wordCount = bookText.split(/\s+/).filter(word => word.length > 0).length;
+    app.log.info({ textLength: bookText.length, wordCount }, 'Text extracted from file');
+    if (wordCount < 10) return reply.code(400).send({ error: 'The uploaded file did not contain enough readable text (minimum 10 words).' });
 
     app.log.info('Calling Claude to extract roster');
     const roster = await claudeToolCall(
@@ -307,6 +312,8 @@ app.post('/api/books/process', async (request, reply) => {
     app.log.info('Getting narrator reference');
     const narratorReference = await latestNarratorReference();
     const references = new Map<string, string>([['Narrator', narratorReference]]);
+    const jobId = randomUUID();
+    jobFiles.set(jobId, new Set());
     for (const character of roster.characters.filter((item) => item.name !== 'Narrator')) {
       app.log.info({ character: character.name }, 'Generating voice preview');
       try {
@@ -320,6 +327,7 @@ app.post('/api/books/process', async (request, reply) => {
         if (!voice.sample_audio?.data || !voice.id) throw new Error(`Gemini did not return a reference for ${character.name}.`);
         const referencePath = path.join(TMP_ROOT, `${voice.id.replace(/[^a-zA-Z0-9_-]/g, '_')}.wav`);
         await writeFile(referencePath, Buffer.from(voice.sample_audio.data, 'base64'));
+        jobFiles.get(jobId)!.add(referencePath);
         references.set(character.name, referencePath);
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
@@ -328,26 +336,44 @@ app.post('/api/books/process', async (request, reply) => {
       }
     }
     app.log.info({ referenceCount: references.size }, 'Voice references generated');
-
-    const jobId = randomUUID();
     app.log.info({ jobId, segmentCount: allSegments.length }, 'Starting IndexTTS generation');
     const outputSegments = [];
     for (const [index, segment] of allSegments.entries()) {
       const speaker = references.has(segment.speaker) ? segment.speaker : 'Narrator';
       const outputPath = await runIndexTts(references.get(speaker)!, segment.text, segment.emotion);
+      jobFiles.get(jobId)!.add(outputPath);
       outputSegments.push({ index, speaker, kind: segment.kind, text: segment.text, emotion: segment.emotion, outputPath });
     }
     app.log.info({ generatedCount: outputSegments.length }, 'IndexTTS generation complete');
 
     const manifestPath = path.join(TMP_ROOT, `${jobId}.json`);
+    const wavPath = path.join(TMP_ROOT, `${jobId}.wav`);
+    const mp3Path = path.join(TMP_ROOT, `${jobId}.mp3`);
     app.log.info('Stitching segments');
     const compiled = await stitchSegments(jobId, outputSegments.map((segment) => segment.outputPath));
     await writeFile(manifestPath, JSON.stringify({ jobId, roster, segments: outputSegments, compiled }, null, 2));
+    jobFiles.get(jobId)!.add(manifestPath);
+    jobFiles.get(jobId)!.add(wavPath);
+    jobFiles.get(jobId)!.add(mp3Path);
     app.log.info({ jobId }, 'Book processing complete');
     return { jobId, roster, segments: outputSegments, compiled, manifestPath };
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Book processing failed.';
     app.log.error({ error, message }, 'Book processing failed');
+    // Clean up files for failed job
+    if (jobId) {
+      const files = jobFiles.get(jobId);
+      if (files) {
+        for (const file of files) {
+          try {
+            await access(file).then(() => rm(file)).catch(() => {});
+          } catch (e) {
+            // Ignore cleanup errors
+          }
+        }
+        jobFiles.delete(jobId);
+      }
+    }
     return reply.code(400).send({ error: message });
   }
 });
@@ -373,6 +399,50 @@ app.post('/api/voice/generate', async (request, reply) => {
     const message = error instanceof z.ZodError ? error.issues.map((issue) => issue.message).join('; ') : error instanceof Error ? error.message : 'Voice generation failed.';
     app.log.error({ error }, 'Voice generation failed');
     return reply.code(400).send({ error: message });
+  }
+});
+
+// Clean up files for a specific job
+app.delete('/api/jobs/:jobId', async (request, reply) => {
+  const { jobId } = request.params as { jobId: string };
+  const files = jobFiles.get(jobId);
+  if (!files) {
+    return reply.code(404).send({ error: 'Job not found' });
+  }
+  let deletedCount = 0;
+  for (const file of files) {
+    try {
+      await access(file).then(() => rm(file)).catch(() => {});
+      deletedCount++;
+    } catch (e) {
+      // Ignore cleanup errors
+    }
+  }
+  jobFiles.delete(jobId);
+  app.log.info({ jobId, deletedCount }, 'Job files cleaned up');
+  return { jobId, deletedCount };
+});
+
+// Clean up all files older than specified hours (default 24)
+app.post('/api/cleanup', async (request, reply) => {
+  const { hours = 24 } = request.body as { hours?: number };
+  const cutoffTime = Date.now() - (hours * 60 * 60 * 1000);
+  let deletedCount = 0;
+  try {
+    const tmpFiles = await readdir(TMP_ROOT);
+    for (const file of tmpFiles) {
+      const filePath = path.join(TMP_ROOT, file);
+      const stats = await stat(filePath);
+      if (stats.mtimeMs < cutoffTime) {
+        await rm(filePath);
+        deletedCount++;
+      }
+    }
+    app.log.info({ hours, deletedCount }, 'Old files cleaned up');
+    return { deletedCount, hours };
+  } catch (error) {
+    app.log.error({ error }, 'Cleanup failed');
+    return reply.code(500).send({ error: 'Cleanup failed' });
   }
 });
 
