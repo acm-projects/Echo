@@ -1,4 +1,7 @@
+
+import { useCallback, useEffect, useState } from 'react';
 import {
+  ActivityIndicator,
   Dimensions,
   Pressable,
   ScrollView,
@@ -10,92 +13,196 @@ import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 
 import { Screen } from '../components/Screen';
-import { colors, fonts } from '../../../theme';
+import { fonts } from '../../../theme';
+import {
+  getMyBooks,
+  getMyProgress,
+  getBookChapters,
+} from '../../data';
+import type {
+  Book,
+  Chapter,
+  UserProgress,
+} from '../../data/types';
 
 const { width } = Dimensions.get('window');
 
-type Book = {
-  id: string;
-  title: string;
-  author: string;
+type DisplayBook = Book & {
   progress: number;
   accent: string;
-  subtitle?: string;
 };
 
-const recommendations: Book[] = [
+const accents: Record<string, string> = {
+  'The Great Gatsby': '#315066',
+  'A Game of Thrones': '#3D4657',
+  'The Lord of the Rings': '#324D38',
+  Frankenstein: '#5C2D37',
+};
+
+// Recommendations are static until we connect the recommendation system.
+const recommendations = [
   {
-    id: 'lotr',
     title: 'The Lord of the Rings',
     author: 'J.R.R. Tolkien',
-    progress: 0,
     accent: '#324D38',
     subtitle: 'An epic journey through Middle-earth.',
   },
   {
-    id: 'dune',
     title: 'Dune',
     author: 'Frank Herbert',
-    progress: 72,
     accent: '#8B673A',
     subtitle: 'Power, destiny, and survival on Arrakis.',
   },
   {
-    id: 'game-of-thrones',
     title: 'A Game of Thrones',
     author: 'George R.R. Martin',
-    progress: 0,
     accent: '#3D4657',
     subtitle: 'Noble houses battle for power.',
   },
 ];
 
-// First item = most recently listened.
-// Remaining books = most recently added first.
-const shelf: Book[] = [
-  {
-    id: 'night-circus',
-    title: 'The Night Circus',
-    author: 'Erin Morgenstern',
-    progress: 42,
-    accent: '#45305F',
-  },
-  {
-    id: 'dune',
-    title: 'Dune',
-    author: 'Frank Herbert',
-    progress: 72,
-    accent: '#8B673A',
-  },
-  {
-    id: 'great-gatsby',
-    title: 'The Great Gatsby',
-    author: 'F. Scott Fitzgerald',
-    progress: 31,
-    accent: '#315066',
-  },
-  {
-    id: 'dracula',
-    title: 'Dracula',
-    author: 'Bram Stoker',
-    progress: 8,
-    accent: '#5C2D37',
-  },
-];
+// Calculate progress using the durations of completed chapters
+// and the current position in the active chapter.
+function calculateProgress(
+  book: Book,
+  chapters: Chapter[],
+  record?: UserProgress
+): number {
+  if (!record || book.status !== 'ready') {
+    return 0;
+  }
 
-function openBook(book: Book) {
+  if (record.is_completed) {
+    return 100;
+  }
+
+  if (!record.chapter_id || book.total_duration_ms <= 0) {
+    return 0;
+  }
+
+  const ordered = [...chapters].sort(
+    (a, b) => a.chapter_index - b.chapter_index
+  );
+
+  const currentIndex = ordered.findIndex(
+    (chapter) => chapter.id === record.chapter_id
+  );
+
+  if (currentIndex < 0) {
+    return 0;
+  }
+
+  const priorDuration = ordered
+    .slice(0, currentIndex)
+    .reduce(
+      (sum, chapter) => sum + (chapter.audio_duration_ms ?? 0),
+      0
+    );
+
+  const currentDuration =
+    ordered[currentIndex].audio_duration_ms ?? 0;
+
+  const position =
+    currentDuration > 0
+      ? Math.min(record.position_ms, currentDuration)
+      : 0;
+
+  const percentage =
+    ((priorDuration + position) / book.total_duration_ms) * 100;
+
+  return Math.min(
+    100,
+    Math.max(0, Math.round(percentage))
+  );
+}
+
+// Open the selected book's details page.
+function openBook(book: DisplayBook) {
   router.push({
     pathname: '/Test/book_details',
     params: {
       id: book.id,
       title: book.title,
-      author: book.author,
+      author: book.author ?? 'Unknown author',
       progress: String(book.progress),
     },
   });
 }
 
 export default function LibraryScreen() {
+  const [shelf, setShelf] = useState<DisplayBook[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const loadBooks = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+
+    try {
+      // Fetch the current user's books and listening progress.
+      const [books, progress] = await Promise.all([
+        getMyBooks(),
+        getMyProgress(),
+      ]);
+
+      // Combine each book with its progress and cover color.
+      const displayBooks = await Promise.all(
+        books.map(async (book) => {
+          const record = progress.find(
+            (item) => item.book_id === book.id
+          );
+
+          const chapters =
+            record && book.status === 'ready'
+              ? await getBookChapters(book.id)
+              : [];
+
+          return {
+            ...book,
+            progress: calculateProgress(
+              book,
+              chapters,
+              record
+            ),
+            accent: accents[book.title] ?? '#34485B',
+          };
+        })
+      );
+
+      // Recently listened books appear first.
+      displayBooks.sort((a, b) => {
+        const aTime = progress.find(
+          (item) => item.book_id === a.id
+        )?.updated_at;
+
+        const bTime = progress.find(
+          (item) => item.book_id === b.id
+        )?.updated_at;
+
+        if (aTime && bTime) {
+          return bTime.localeCompare(aTime);
+        }
+
+        if (aTime) return -1;
+        if (bTime) return 1;
+
+        return b.created_at.localeCompare(a.created_at);
+      });
+
+      setShelf(displayBooks);
+    } catch {
+      setError(
+        'Could not load your books. Please try again.'
+      );
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadBooks();
+  }, [loadBooks]);
+
   return (
     <Screen>
       <ScrollView
@@ -104,8 +211,13 @@ export default function LibraryScreen() {
       >
         <View style={styles.header}>
           <View>
-            <Text style={styles.eyebrow}>YOUR LIBRARY</Text>
-            <Text style={styles.title}>Find your next story.</Text>
+            <Text style={styles.eyebrow}>
+              YOUR LIBRARY
+            </Text>
+
+            <Text style={styles.title}>
+              Find your next story.
+            </Text>
           </View>
 
           <Pressable style={styles.searchButton}>
@@ -133,12 +245,20 @@ export default function LibraryScreen() {
         >
           {recommendations.map((book) => (
             <Pressable
-              key={book.id}
+              key={book.title}
               style={[
                 styles.heroCard,
                 { backgroundColor: book.accent },
               ]}
-              onPress={() => openBook(book)}
+              onPress={() => {
+                const match = shelf.find(
+                  (item) => item.title === book.title
+                );
+
+                if (match) {
+                  openBook(match);
+                }
+              }}
             >
               <View style={styles.heroTop}>
                 <Text style={styles.recommendedLabel}>
@@ -186,6 +306,7 @@ export default function LibraryScreen() {
                       size={14}
                       color="#17131E"
                     />
+
                     <Text style={styles.viewBookText}>
                       View Book
                     </Text>
@@ -197,103 +318,199 @@ export default function LibraryScreen() {
         </ScrollView>
 
         <View style={styles.dots}>
-          <View style={[styles.dot, styles.activeDot]} />
+          <View
+            style={[
+              styles.dot,
+              styles.activeDot,
+            ]}
+          />
           <View style={styles.dot} />
           <View style={styles.dot} />
         </View>
 
         <View style={styles.shelfHeader}>
           <View>
-            <Text style={styles.sectionTitle}>Your Shelf</Text>
+            <Text style={styles.sectionTitle}>
+              Your Shelf
+            </Text>
+
             <Text style={styles.sectionSubtitle}>
               Pick up where you left off
             </Text>
           </View>
 
-          <Text style={styles.seeAll}>See All</Text>
+          <Text style={styles.seeAll}>
+            See All
+          </Text>
         </View>
 
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.shelf}
-        >
-          {shelf.map((book, index) => (
-            <Pressable
-              key={`${book.id}-${index}`}
-              style={styles.bookContainer}
-              onPress={() => openBook(book)}
-            >
-              <View
-                style={[
-                  styles.bookCover,
-                  { backgroundColor: book.accent },
-                ]}
-              >
-                {index === 0 && (
-                  <View style={styles.lastPlayedBadge}>
-                    <Ionicons
-                      name="play"
-                      size={9}
-                      color="#FFFFFF"
-                    />
-                    <Text style={styles.lastPlayedText}>
-                      LAST PLAYED
-                    </Text>
-                  </View>
-                )}
+        {loading ? (
+          <View style={styles.message}>
+            <ActivityIndicator color="#FFFFFF" />
 
-                <Ionicons
-                  name="book-outline"
-                  size={42}
-                  color="rgba(255,255,255,0.75)"
-                />
+            <Text style={styles.messageText}>
+              Loading your books...
+            </Text>
+          </View>
+        ) : error ? (
+          <View style={styles.message}>
+            <Text style={styles.messageText}>
+              {error}
+            </Text>
+
+            <Pressable
+              onPress={() => void loadBooks()}
+            >
+              <Text style={styles.retry}>
+                Try Again
+              </Text>
+            </Pressable>
+          </View>
+        ) : shelf.length === 0 ? (
+          <View style={styles.message}>
+            <Text style={styles.messageText}>
+              Your shelf is empty. Upload a book to get started.
+            </Text>
+          </View>
+        ) : (
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.shelf}
+          >
+            {shelf.map((book, index) => (
+              <Pressable
+                key={book.id}
+                style={styles.bookContainer}
+                onPress={() => openBook(book)}
+              >
+                <View
+                  style={[
+                    styles.bookCover,
+                    {
+                      backgroundColor: book.accent,
+                    },
+                  ]}
+                >
+                  {index === 0 &&
+                    book.progress > 0 && (
+                      <View
+                        style={styles.lastPlayedBadge}
+                      >
+                        <Ionicons
+                          name="play"
+                          size={9}
+                          color="#FFFFFF"
+                        />
+
+                        <Text
+                          style={styles.lastPlayedText}
+                        >
+                          LAST PLAYED
+                        </Text>
+                      </View>
+                    )}
+
+                  <Ionicons
+                    name="book-outline"
+                    size={42}
+                    color="rgba(255,255,255,0.75)"
+                  />
+
+                  <Text
+                    style={styles.coverTitle}
+                    numberOfLines={3}
+                  >
+                    {book.title}
+                  </Text>
+                </View>
 
                 <Text
-                  style={styles.coverTitle}
-                  numberOfLines={3}
+                  style={styles.bookTitle}
+                  numberOfLines={1}
                 >
                   {book.title}
                 </Text>
-              </View>
 
-              <Text
-                style={styles.bookTitle}
-                numberOfLines={1}
-              >
-                {book.title}
-              </Text>
-
-              <Text
-                style={styles.bookAuthor}
-                numberOfLines={1}
-              >
-                {book.author}
-              </Text>
-
-              <View style={styles.progressRow}>
-                <View style={styles.progressTrack}>
-                  <View
-                    style={[
-                      styles.progressFill,
-                      { width: `${book.progress}%` },
-                    ]}
-                  />
-                </View>
-
-                <Text style={styles.progressText}>
-                  {book.progress}%
+                <Text
+                  style={styles.bookAuthor}
+                  numberOfLines={1}
+                >
+                  {book.author ?? 'Unknown author'}
                 </Text>
-              </View>
-            </Pressable>
-          ))}
-        </ScrollView>
+
+                {book.status !== 'ready' && (
+                  <Text style={styles.bookStatus}>
+                    {book.status === 'failed'
+                      ? 'Failed'
+                      : book.status === 'uploaded'
+                        ? 'Uploaded'
+                        : book.status === 'queued'
+                          ? 'Queued'
+                          : 'Processing'}
+                  </Text>
+                )}
+
+                {book.status === 'ready' && (
+                  <View style={styles.progressRow}>
+                    <View
+                      style={styles.progressTrack}
+                    >
+                      <View
+                        style={[
+                          styles.progressFill,
+                          {
+                            width: `${book.progress}%`,
+                          },
+                        ]}
+                      />
+                    </View>
+
+                    <Text
+                      style={styles.progressText}
+                    >
+                      {book.progress}%
+                    </Text>
+                  </View>
+                )}
+              </Pressable>
+            ))}
+          </ScrollView>
+        )}
       </ScrollView>
     </Screen>
   );
 }
 
 const styles = StyleSheet.create({
+  message: {
+    paddingHorizontal: 20,
+    paddingVertical: 26,
+    alignItems: 'center',
+    gap: 12,
+  },
+
+  messageText: {
+    color: 'rgba(255,255,255,0.7)',
+    fontSize: 14,
+    textAlign: 'center',
+  },
+
+  retry: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '800',
+    textDecorationLine: 'underline',
+  },
+
+  bookStatus: {
+    color: 'rgba(255,255,255,0.75)',
+    fontSize: 11,
+    marginTop: 9,
+    fontWeight: '700',
+    textTransform: 'capitalize',
+  },
+
   page: {
     paddingTop: 20,
     paddingBottom: 150,
