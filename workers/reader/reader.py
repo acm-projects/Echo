@@ -45,16 +45,25 @@ def main() -> None:
         temporary_path = output_path.with_name(f"{output_path.stem}.tmp{output_path.suffix}")
         try:
             emit({"type": "progress", "jobId": job_id, "value": 0.1})
+            emotion_vector = job.get("emotionVector")
+            if emotion_vector:
+                # Explicit [happy, angry, sad, afraid, disgusted, melancholic, surprised, calm]
+                # weights skip QwenEmotion; apply the same bias and 0.8 cap as the IndexTTS web UI.
+                emotion_args = {"emo_vector": tts.normalize_emo_vec([float(v) for v in emotion_vector], apply_bias=True)}
+            elif job.get("emotion"):
+                # IndexTTS recommends emo_alpha around 0.6 for text-derived emotion.
+                emotion_args = {"emo_text": job["emotion"], "use_emo_text": True, "emo_alpha": 0.6}
+            else:
+                emotion_args = {}
             with redirect_stdout(sys.stderr):
                 tts.infer(
                     spk_audio_prompt=job["referencePath"],
                     text=job["text"],
                     lang=job.get("language", "EN"),
                     output_path=str(temporary_path),
-                    emo_text=job.get("emotion", ""),
-                    use_emo_text=bool(job.get("emotion")),
                     use_random=False,
                     verbose=False,
+                    **emotion_args,
                 )
             os.replace(temporary_path, output_path)
             emit({"type": "result", "jobId": job_id, "outputPath": str(output_path)})

@@ -1,10 +1,14 @@
-import { Pressable, ScrollView, StyleSheet, Text, View, Alert, ActivityIndicator } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as DocumentPicker from 'expo-document-picker';
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
+import { router, useFocusEffect } from 'expo-router';
 
 import { Screen } from '../components/Screen';
 import { colors, fonts, type } from '../../../theme';
+import { getNarrators } from '../../data/narrators';
+import { processBook } from '../../data/bookJobs';
+import { notify } from '../../../lib/notify';
 
 const PUBLIC_DOMAIN_BOOKS = [
   {
@@ -40,6 +44,14 @@ const PUBLIC_DOMAIN_BOOKS = [
 export default function Upload() {
   const [processing, setProcessing] = useState(false);
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
+  const [stage, setStage] = useState<string | null>(null);
+  const [narratorName, setNarratorName] = useState<string | null>(null);
+
+  useFocusEffect(useCallback(() => {
+    getNarrators()
+      .then((state) => setNarratorName(state.voices.find((voice) => voice.id === state.selectedId)?.name ?? null))
+      .catch(() => setNarratorName(null));
+  }, []));
 
   const selectAndProcess = async () => {
     const result = await DocumentPicker.getDocumentAsync({
@@ -50,23 +62,15 @@ export default function Upload() {
     const file = result.assets[0];
     setSelectedFile(file.name);
     setProcessing(true);
+    setStage('Uploading');
     try {
-      const form = new FormData();
-      // Web platform: pass the File object directly
-      // React Native: pass object with uri, name, type
-      if (file.file) {
-        form.append('book', file.file, file.name);
-      } else {
-        form.append('book', { uri: file.uri, name: file.name, type: file.mimeType ?? 'application/octet-stream' } as any);
-      }
-      const response = await fetch(`${process.env.EXPO_PUBLIC_VOICE_SERVER_URL ?? 'http://127.0.0.1:8787'}/api/books/process`, { method: 'POST', body: form });
-      const data = await response.json() as { error?: string; roster?: Array<{ name: string }> };
-      if (!response.ok) throw new Error(data.error ?? 'Book processing failed.');
-      Alert.alert('Book processed', `${data.roster?.length ?? 0} voices found. IndexTTS generated the segment audio.`);
+      const job = await processBook(file, setStage);
+      notify('Book processed', `${job.result?.roster?.length ?? 0} voices found. IndexTTS generated the segment audio.`);
     } catch (error) {
-      Alert.alert('Upload failed', error instanceof Error ? error.message : 'Could not process this file.');
+      notify('Upload failed', error instanceof Error ? error.message : 'Could not process this file.');
     } finally {
       setProcessing(false);
+      setStage(null);
     }
   };
 
@@ -103,16 +107,29 @@ export default function Upload() {
           </View>
 
           <Text style={s.uploadTitle}>
-            {processing ? 'Processing with Claude + IndexTTS...' : selectedFile ?? 'Upload a File'}
+            {processing ? selectedFile : selectedFile ?? 'Upload a File'}
           </Text>
 
           <Text style={s.uploadDescription}>
-            Add a book from your device
+            {processing ? `${stage ?? 'Processing'}...` : 'Add a book from your device'}
           </Text>
 
           <Text style={s.fileTypes}>
-            PDF · EPUB · MOBI · Up to 50 MB
+            PDF · EPUB · TXT · MD · Up to 50 MB
           </Text>
+        </Pressable>
+
+        <Pressable style={s.narratorCard} onPress={() => router.push('/narrator-voices')}>
+          <View style={s.narratorIcon}>
+            <Ionicons name="mic-outline" size={22} color={colors.pink} />
+          </View>
+          <View style={s.narratorInfo}>
+            <Text style={s.narratorTitle}>Narrator Voice</Text>
+            <Text style={s.narratorSubtitle} numberOfLines={1}>
+              {narratorName ? `Narrating as ${narratorName}` : 'Create and choose who reads your books'}
+            </Text>
+          </View>
+          <Ionicons name="chevron-forward" size={20} color={colors.faint} />
         </Pressable>
 
         <View style={s.sectionHeader}>
@@ -259,6 +276,43 @@ const s = StyleSheet.create({
     ...type.meta,
     color: colors.faint,
     marginTop: 8,
+  },
+
+  narratorCard: {
+    marginTop: 12,
+    padding: 14,
+    borderRadius: 20,
+    backgroundColor: colors.card,
+    borderWidth: 1,
+    borderColor: colors.border,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+
+  narratorIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(214,123,176,0.14)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  narratorInfo: {
+    flex: 1,
+    marginHorizontal: 12,
+  },
+
+  narratorTitle: {
+    fontFamily: fonts.sansBold,
+    color: colors.text,
+    fontSize: 15,
+  },
+
+  narratorSubtitle: {
+    ...type.meta,
+    color: colors.dim,
+    marginTop: 3,
   },
 
   sectionHeader: {

@@ -1,4 +1,5 @@
-import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { notify } from '../../../lib/notify';
 import { Ionicons } from '@expo/vector-icons';
 import { Screen } from '../components/Screen';
 import { colors, fonts, type } from '../../../theme';
@@ -23,7 +24,7 @@ export default function Profile() {
     const { error } = await supabase.auth.signOut();
 
     if (error) {
-      Alert.alert('Sign out failed', error.message);
+      notify('Sign out failed', error.message);
       return;
     }
 
@@ -32,7 +33,7 @@ export default function Profile() {
   const getUser = async () => {
     const { data: { user }, error } = await supabase.auth.getUser();
     if (error || !user) {
-      Alert.alert('Failed to fetch user', error?.message || 'User not found');
+      notify('Failed to fetch user', error?.message || 'User not found');
       return;
     }
     else{
@@ -43,7 +44,7 @@ export default function Profile() {
   const getEmail = async () => {
     const { data: { user }, error } = await supabase.auth.getUser();
     if (error || !user) {
-      Alert.alert('Failed to fetch user', error?.message || 'User not found');
+      notify('Failed to fetch user', error?.message || 'User not found');
       return;
     }
     else{

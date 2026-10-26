@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { Alert, KeyboardAvoidingView, Platform, Pressable, ScrollView, Text, View } from 'react-native';
+import { KeyboardAvoidingView, Platform, Pressable, ScrollView, Text, View } from 'react-native';
+import { notify } from '../../../lib/notify';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { Screen } from '../components/Screen';
@@ -19,12 +20,12 @@ export default function Signup() {
 
   const handleSignup = async () => {
     if (!username.trim() || !email.trim() || !password) {
-      Alert.alert('Missing information', 'Please complete all fields.');
+      notify('Missing information', 'Please complete all fields.');
       return;
     }
 
     if (password !== confirmPassword) {
-      Alert.alert('Passwords do not match', 'Enter the same password in both fields.');
+      notify('Passwords do not match', 'Enter the same password in both fields.');
       return;
     }
 
@@ -37,11 +38,11 @@ export default function Signup() {
     setLoading(false);
 
     if (error) {
-      Alert.alert('Sign up failed', error.message);
+      notify('Sign up failed', error.message);
       return;
     }
 
-    Alert.alert('Account created', 'You can now sign in to Echo.');
+    notify('Account created', 'You can now sign in to Echo.');
     router.replace('/Test/login');
   };
 

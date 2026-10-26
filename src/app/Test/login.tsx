@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { Alert, Pressable, Text, View } from 'react-native';
+import { Pressable, Text, View } from 'react-native';
+import { notify } from '../../../lib/notify';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as WebBrowser from 'expo-web-browser';
@@ -24,7 +25,7 @@ export default function Login() {
     });
 
     if (error) {
-      Alert.alert('Login failed', error.message);
+      notify('Login failed', error.message);
     } else {
       router.replace('/Test/player');
     }

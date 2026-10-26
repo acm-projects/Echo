@@ -1,11 +1,11 @@
 import { useState } from 'react';
-import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useAudioPlayer } from 'expo-audio';
 import { Screen } from '../components/Screen';
 import { GradientButton } from '../components/GradientButton';
 import { colors, fonts, type } from '../../../theme';
-
-const SERVER_URL = process.env.EXPO_PUBLIC_VOICE_SERVER_URL ?? 'http://127.0.0.1:8787';
+import { notify } from '../../../lib/notify';
+import { VOICE_SERVER_URL as SERVER_URL } from '../../data/voiceServer';
 
 export default function VoiceLab() {
   const player = useAudioPlayer(null);
@@ -24,14 +24,15 @@ export default function VoiceLab() {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ voiceDescription, text, emotion, displayName: 'Echo voice lab' }),
       });
-      const data = await response.json() as { error?: string; voiceId?: string; audioBase64?: string };
-      if (!response.ok || !data.voiceId || !data.audioBase64) throw new Error(data.error ?? 'Voice generation failed.');
-      player.replace({ uri: `data:audio/wav;base64,${data.audioBase64}` });
+      const data = await response.json() as { error?: string; voiceId?: string; audioUrl?: string };
+      if (!response.ok || !data.voiceId || !data.audioUrl) throw new Error(data.error ?? 'Voice generation failed.');
+      // Played from a URL rather than a base64 data: URI, which native players don't reliably support.
+      player.replace({ uri: `${SERVER_URL}${data.audioUrl}` });
       player.play();
       setResult({ voiceId: data.voiceId });
-      Alert.alert('Voice generated', 'Gemini designed the voice and IndexTTS read your text with it.');
+      notify('Voice generated', 'Gemini designed the voice and IndexTTS read your text with it.');
     } catch (error) {
-      Alert.alert('Generation failed', error instanceof Error ? error.message : 'Could not reach the voice server.');
+      notify('Generation failed', error instanceof Error ? error.message : 'Could not reach the voice server.');
     } finally {
       setLoading(false);
     }
@@ -39,6 +40,7 @@ export default function VoiceLab() {
 
   return (
     <Screen style={s.screen}>
+      <KeyboardAvoidingView style={s.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <ScrollView contentContainerStyle={s.content} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
         <Text style={type.meta}>INTERNAL SAMPLE</Text>
         <Text style={s.title}>Voice lab</Text>
@@ -57,12 +59,14 @@ export default function VoiceLab() {
         {loading && <View style={s.status}><ActivityIndicator color={colors.gold} /><Text style={type.meta}>Loading IndexTTS once on the local worker...</Text></View>}
         {result && <Text style={[type.meta, s.success]}>Generated with voice {result.voiceId}</Text>}
       </ScrollView>
+      </KeyboardAvoidingView>
     </Screen>
   );
 }
 
 const s = StyleSheet.create({
   screen: { paddingHorizontal: 24 },
+  flex: { flex: 1 },
   content: { paddingVertical: 20, paddingBottom: 40 },
   title: { fontFamily: fonts.serif, fontSize: 34, color: colors.text, marginTop: 8 },
   intro: { marginTop: 8, marginBottom: 26, lineHeight: 21 },

@@ -28,6 +28,7 @@ expo-env.d.ts
 /server/node_modules/
 /server/dist/
 /server/tmp/
+/server/data/
 /server/.env
 /server/app.json
 
