@@ -74,7 +74,16 @@ export default function Profile() {
         </View>
 
         <View style={{ alignItems: 'center', marginVertical: 24, gap: 6 }}>
-          <View style={s.avatar}><Text style={{ fontFamily: fonts.sansBold, fontSize: 30, color: colors.dim }}>ZB</Text></View>
+          <View style={s.avatar}>
+            <Text
+              style={{
+                fontFamily: fonts.sansBold,
+                fontSize: 30,
+                color: colors.dim,
+              }}>
+              {user.trim().charAt(0).toUpperCase() || '?'}
+            </Text>
+          </View>
           <Text style={{ fontFamily: fonts.serif, fontSize: 26, color: colors.text }}>{user}</Text>
           <Text style={type.body}>{email}</Text>
         </View>
