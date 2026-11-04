@@ -3202,3 +3202,10 @@
 {"_e":"metro:client_log","_t":1791606956979,"level":"warn","data":["Route \"./components/ProgressBar.tsx\" is missing the required default export. Ensure a React component is exported as default."]}
 {"_e":"metro:client_log","_t":1791606956979,"level":"warn","data":["Route \"./components/Screen.tsx\" is missing the required default export. Ensure a React component is exported as default."]}
 {"_e":"metro:client_log","_t":1791606957117,"level":"warn","data":["props.pointerEvents is deprecated. Use style.pointerEvents"]}
+{"_e":"root:init","_t":1792636394524,"format":"v0-jsonl","version":"57.0.26"}
+{"_e":"env:mode","_t":1792636394526,"nodeEnv":"development","babelEnv":"development","mode":"development"}
+{"_e":"env:load","_t":1792636394533,"mode":"development","files":["../..\\..\\.env"],"env":{"EXPO_PUBLIC_SUPABASE_ANON_KEY":"sb_publishable_YMQMKAQcDPX7Jx37Qb9cwA_4OWTxTx4","EXPO_PUBLIC_SUPABASE_URL":"https://pbdmireqwryictofgatk.supabase.co/","SUPABASE_JWKS_URL":"https://pbdmireqwryictofgatk.supabase.co/auth/v1/.well-known/jwks.json","SUPABASE_PUBLISHABLE_KEY":"sb_publishable_YMQMKAQcDPX7Jx37Qb9cwA_4OWTxTx4","SUPABASE_URL":"https://pbdmireqwryictofgatk.supabase.co/"}}
+{"_e":"devserver:start","_t":1792636400480,"mode":"development","web":true,"baseUrl":"","asyncRoutes":false,"routerRoot":"../..\\..\\src\\app","serverComponents":false,"serverActions":false,"serverRendering":true,"apiRoutes":false,"exporting":false}
+{"_e":"metro:config","_t":1792636415960,"serverRoot":"../..\\..","projectRoot":"../..\\..","exporting":false,"flags":{"autolinkingModuleResolution":false,"serverActions":false,"serverComponents":false,"reactCompiler":true,"optimizeGraph":false,"treeshaking":false,"logbox":false}}
+{"_e":"expo:dev-tools-plugin:load","_t":1792636421243,"plugins":[]}
+{"_e":"metro:instantiate","_t":1792636437820,"atlas":false,"workers":8,"host":"::","port":8081}
