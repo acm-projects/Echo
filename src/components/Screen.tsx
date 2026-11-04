@@ -1,22 +1,19 @@
 import { ReactNode } from 'react';
-import { StyleSheet, View, ViewStyle } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
+import { Animated, StyleSheet, View, ViewStyle } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { colors } from '../../theme';
+import { scenes, type SceneName } from '../../theme';
+import { NightSky } from './night/NightSky';
+import type { CityVariant } from './night/NightCity';
 
-type Pct = `${number}%`;
-const STARS: [number, number, number][] = [[8, 6, 2], [22, 14, 1.5], [70, 9, 2.5], [90, 22, 1.5], [40, 30, 1.5], [12, 48, 2], [85, 55, 2], [55, 70, 1.5]];
-
-export function Screen({ children, style }: { children: ReactNode; style?: ViewStyle }) {
+// Every inner screen sits in the same night city, but each picks its own `scene` (sky, horizon glow, window light).
+// Pass `variant="hero"` and the ScrollView's `scrollY` on showpiece screens for the layered parallax city.
+export function Screen({ children, style, city = true, scene = 'midnight', variant, scrollY }: { children: ReactNode; style?: ViewStyle; city?: boolean; scene?: SceneName; variant?: CityVariant; scrollY?: Animated.Value }) {
+  const palette = scenes[scene];
   return (
-    <LinearGradient colors={[colors.bg, colors.bgMid, colors.bgLow]} locations={[0, 0.6, 1]} style={s.fill}>
-      <View style={[StyleSheet.absoluteFill, s.passThrough]}>
-        {STARS.map(([x, y, r], i) => (
-          <View key={i} style={{ position: 'absolute', left: `${x}%` as Pct, top: `${y}%` as Pct, width: r * 2, height: r * 2, borderRadius: r, backgroundColor: '#fff', opacity: 0.7 }} />
-        ))}
-      </View>
+    <View style={[s.root, { backgroundColor: palette.sky[0] }]}>
+      <NightSky city={city} variant={variant} scrollY={scrollY} scene={palette} />
       <SafeAreaView style={[s.fill, style]} edges={['top']}>{children}</SafeAreaView>
-    </LinearGradient>
+    </View>
   );
 }
-const s = StyleSheet.create({ fill: { flex: 1 }, passThrough: { pointerEvents: 'none' } });
+const s = StyleSheet.create({ root: { flex: 1 }, fill: { flex: 1 } });

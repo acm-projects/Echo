@@ -20,7 +20,7 @@ export function CastCard({ name, role, voice, roleColor = colors.pink, avatarCol
   );
 }
 const s = StyleSheet.create({
-  card: { flexDirection: 'row', alignItems: 'center', gap: 14, padding: 14, borderRadius: 22, backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border, marginBottom: 12 },
+  card: { flexDirection: 'row', alignItems: 'center', gap: 14, padding: 14, borderRadius: 12, backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border, marginBottom: 12 },
   avatar: { width: 64, height: 64, borderRadius: 32 },
   pill: { alignSelf: 'flex-start', borderRadius: 10, paddingHorizontal: 10, paddingVertical: 3 },
   pillText: { fontFamily: fonts.sansBold, fontSize: 11, color: '#2A1258' },

@@ -7,9 +7,10 @@ import {
   View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { router } from 'expo-router';
 
-import { Screen } from '../../components/Screen';
-import { colors, fonts, type } from '../../../theme';
+import { Screen } from '../../../components/Screen';
+import { colors, fonts, type } from '../../../../theme';
 
 type CommunityTab = 'Book Rooms' | 'Following';
 
@@ -58,7 +59,7 @@ export default function Community() {
     useState<CommunityTab>('Book Rooms');
 
   return (
-    <Screen>
+    <Screen scene="ember">
       <ScrollView
         showsVerticalScrollIndicator={false}
         contentContainerStyle={s.content}
@@ -123,6 +124,8 @@ function BookRooms() {
           <Pressable
             key={room.id}
             style={s.room}
+            onPress={() => router.push({ pathname: '/Test/room', params: { id: room.id, title: room.title, accent: room.accent, readers: room.readers } })}
+            accessibilityRole="button"
           >
             <View
               style={[
@@ -183,7 +186,7 @@ function BookRooms() {
           </Text>
         </View>
 
-        <Pressable>
+        <Pressable onPress={() => router.push('/Test/search')} accessibilityRole="button">
           <Text style={s.seeAll}>
             See All
           </Text>
@@ -199,6 +202,8 @@ function BookRooms() {
           <Pressable
             key={room.id}
             style={s.discoverCard}
+            onPress={() => router.push({ pathname: '/Test/room', params: { id: room.id, title: room.title, accent: room.accent, readers: `${room.members} members` } })}
+            accessibilityRole="button"
           >
             <View
               style={[
@@ -231,6 +236,7 @@ function BookRooms() {
 }
 
 function Following() {
+  const [revealed, setRevealed] = useState(false);
   return (
     <View>
       <View style={s.sectionHeader}>
@@ -244,7 +250,7 @@ function Following() {
           </Text>
         </View>
 
-        <Pressable style={s.peopleButton}>
+        <Pressable style={s.peopleButton} onPress={() => router.push('/Test/people')} accessibilityRole="button" accessibilityLabel="Find friends">
           <Ionicons
             name="people-outline"
             size={19}
@@ -298,25 +304,31 @@ function Following() {
           </Text>
         </View>
 
-        <Pressable style={s.spoiler}>
-          <Ionicons
-            name="eye-outline"
-            size={23}
-            color={colors.dim}
-          />
-
-          <Text style={s.spoilerTitle}>
-            Spoiler protected
+        {revealed ? (
+          <Text style={s.revealedText}>
+            The duel in the desert isn't the real test. Paul's choice afterwards is, and it changes how everyone looks at him.
           </Text>
+        ) : (
+          <Pressable style={s.spoiler} onPress={() => setRevealed(true)} accessibilityRole="button" accessibilityLabel="Reveal spoiler">
+            <Ionicons
+              name="eye-outline"
+              size={23}
+              color={colors.dim}
+            />
 
-          <Text style={s.spoilerDescription}>
-            You're currently on Chapter 7
-          </Text>
+            <Text style={s.spoilerTitle}>
+              Spoiler protected
+            </Text>
 
-          <Text style={s.reveal}>
-            Tap to reveal
-          </Text>
-        </Pressable>
+            <Text style={s.spoilerDescription}>
+              You're currently on Chapter 7
+            </Text>
+
+            <Text style={s.reveal}>
+              Tap to reveal
+            </Text>
+          </Pressable>
+        )}
 
         <View style={s.stats}>
           <View style={s.stat}>
@@ -388,6 +400,7 @@ function ActivityCard({
 }
 
 const s = StyleSheet.create({
+  revealedText: { fontFamily: fonts.sans, fontSize: 15, lineHeight: 22, color: colors.text, marginVertical: 8 },
   content: {
     padding: 20,
     paddingBottom: 150,
@@ -398,7 +411,7 @@ const s = StyleSheet.create({
     backgroundColor: colors.card,
     borderWidth: 1,
     borderColor: colors.border,
-    borderRadius: 22,
+    borderRadius: 12,
     padding: 4,
     marginTop: 18,
     marginBottom: 28,
@@ -407,7 +420,7 @@ const s = StyleSheet.create({
   tab: {
     flex: 1,
     height: 42,
-    borderRadius: 18,
+    borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -452,7 +465,7 @@ const s = StyleSheet.create({
 
   room: {
     minHeight: 126,
-    borderRadius: 22,
+    borderRadius: 12,
     backgroundColor: colors.card,
     borderWidth: 1,
     borderColor: colors.border,
@@ -523,7 +536,7 @@ const s = StyleSheet.create({
   discoverCover: {
     width: 130,
     height: 155,
-    borderRadius: 14,
+    borderRadius: 10,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 9,
@@ -554,7 +567,7 @@ const s = StyleSheet.create({
   },
 
   activityCard: {
-    borderRadius: 20,
+    borderRadius: 12,
     backgroundColor: colors.card,
     borderWidth: 1,
     borderColor: colors.border,
@@ -614,7 +627,7 @@ const s = StyleSheet.create({
 
   post: {
     padding: 16,
-    borderRadius: 22,
+    borderRadius: 12,
     backgroundColor: colors.card,
     borderWidth: 1,
     borderColor: colors.border,
@@ -650,7 +663,7 @@ const s = StyleSheet.create({
 
   spoiler: {
     minHeight: 145,
-    borderRadius: 17,
+    borderRadius: 10,
     backgroundColor: 'rgba(255,255,255,0.045)',
     borderWidth: 1,
     borderColor: colors.border,

@@ -20,7 +20,7 @@ export function BookCard({ title, author, progress = 0, tint, onPress }: Props) 
   );
 }
 const s = StyleSheet.create({
-  card: { width: '48%', borderRadius: 20, backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border, overflow: 'hidden', marginBottom: 14 },
+  card: { width: '48%', borderRadius: 12, backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border, overflow: 'hidden', marginBottom: 14 },
   cover: { aspectRatio: 1, alignItems: 'flex-end', padding: 10 },
   badge: { backgroundColor: 'rgba(0,0,0,0.45)', borderRadius: 10, paddingHorizontal: 10, paddingVertical: 5 },
   badgeText: { color: '#fff', fontFamily: fonts.sansBold, fontSize: 11 },

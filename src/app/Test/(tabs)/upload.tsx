@@ -4,48 +4,26 @@ import * as DocumentPicker from 'expo-document-picker';
 import { useCallback, useState } from 'react';
 import { router, useFocusEffect } from 'expo-router';
 
-import { Screen } from '../../components/Screen';
-import { colors, fonts, type } from '../../../theme';
-import { getNarrators } from '../../data/narrators';
-import { processBook } from '../../data/bookJobs';
-import { notify } from '../../../lib/notify';
+import { Screen } from '../../../components/Screen';
+import { colors, fonts, type } from '../../../../theme';
+import { getNarrators } from '../../../data/narrators';
+import { processBook } from '../../../data/bookJobs';
+import { notify } from '../../../../lib/notify';
+import { Sheet } from '../../../components/Sheet';
+import { ClassicSheet } from '../../../components/ClassicSheet';
+import { CLASSICS, useSavedClassics, type Classic } from '../../../data/catalog';
 
-const PUBLIC_DOMAIN_BOOKS = [
-  {
-    id: 'pride-prejudice',
-    title: 'Pride and Prejudice',
-    author: 'Jane Austen',
-    year: '1813',
-    accent: '#7D5C75',
-  },
-  {
-    id: 'frankenstein',
-    title: 'Frankenstein',
-    author: 'Mary Shelley',
-    year: '1818',
-    accent: '#45584D',
-  },
-  {
-    id: 'dracula',
-    title: 'Dracula',
-    author: 'Bram Stoker',
-    year: '1897',
-    accent: '#603D49',
-  },
-  {
-    id: 'gatsby',
-    title: 'The Great Gatsby',
-    author: 'F. Scott Fitzgerald',
-    year: '1925',
-    accent: '#3E596A',
-  },
-];
+// The first few classics; See All opens the full catalog.
+const PUBLIC_DOMAIN_BOOKS = CLASSICS.slice(0, 4);
 
 export default function Upload() {
   const [processing, setProcessing] = useState(false);
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const [stage, setStage] = useState<string | null>(null);
   const [narratorName, setNarratorName] = useState<string | null>(null);
+  const [helpOpen, setHelpOpen] = useState(false);
+  const [openBook, setOpenBook] = useState<Classic | null>(null);
+  const [saved, toggleSaved] = useSavedClassics();
 
   useFocusEffect(useCallback(() => {
     getNarrators()
@@ -75,7 +53,7 @@ export default function Upload() {
   };
 
   return (
-    <Screen>
+    <Screen scene="tidewater">
       <ScrollView
         showsVerticalScrollIndicator={false}
         contentContainerStyle={s.content}
@@ -88,7 +66,7 @@ export default function Upload() {
             </Text>
           </View>
 
-          <Pressable style={s.help}>
+          <Pressable style={s.help} onPress={() => setHelpOpen(true)} accessibilityRole="button" accessibilityLabel="How uploading works">
             <Ionicons
               name="help"
               size={18}
@@ -143,7 +121,7 @@ export default function Upload() {
             </Text>
           </View>
 
-          <Pressable>
+          <Pressable onPress={() => router.push('/Test/catalog')} accessibilityRole="button">
             <Text style={s.seeAll}>
               See All
             </Text>
@@ -152,10 +130,11 @@ export default function Upload() {
 
         <View style={s.books}>
           {PUBLIC_DOMAIN_BOOKS.map((book) => (
-            <Pressable
-              key={book.id}
-              style={s.bookRow}
-            >
+            <View key={book.id} style={s.bookRow}>
+              <Pressable style={s.bookTap}
+                onPress={() => setOpenBook(book)}
+                accessibilityRole="button"
+              >
               <View
                 style={[
                   s.cover,
@@ -189,21 +168,43 @@ export default function Upload() {
                 </Text>
               </View>
 
+              </Pressable>
               <Pressable
                 style={s.addBookButton}
                 hitSlop={8}
+                onPress={() => toggleSaved(book.id)}
+                accessibilityRole="button"
+                accessibilityLabel={saved.has(book.id) ? 'Remove from saved' : 'Save for later'}
               >
                 <Ionicons
-                  name="add"
-                  size={24}
-                  color={colors.text}
+                  name={saved.has(book.id) ? 'bookmark' : 'add'}
+                  size={saved.has(book.id) ? 20 : 24}
+                  color={saved.has(book.id) ? colors.gold : colors.text}
                 />
               </Pressable>
-            </Pressable>
+            </View>
           ))}
         </View>
 
       </ScrollView>
+
+      <ClassicSheet book={openBook} saved={openBook ? saved.has(openBook.id) : false} onToggle={() => openBook && toggleSaved(openBook.id)} onClose={() => setOpenBook(null)} />
+
+      <Sheet visible={helpOpen} onClose={() => setHelpOpen(false)} title="How uploading works">
+        <View style={{ gap: 12, paddingBottom: 8 }}>
+          {[
+            ['document-text-outline', 'PDF, EPUB, TXT or Markdown, up to 50 MB. The file needs real text; scanned page images can’t be read yet.'],
+            ['people-outline', 'Echo reads the book, finds every character, and gives each one their own voice.'],
+            ['time-outline', 'Short stories take a few minutes. You can leave this screen; we’ll keep working.'],
+            ['mic-outline', 'Your chosen narrator reads everything that isn’t dialogue.'],
+          ].map(([icon, text]) => (
+            <View key={icon} style={{ flexDirection: 'row', gap: 12 }}>
+              <Ionicons name={icon as keyof typeof Ionicons.glyphMap} size={20} color={colors.pink} />
+              <Text style={[type.body, { flex: 1, lineHeight: 21 }]}>{text}</Text>
+            </View>
+          ))}
+        </View>
+      </Sheet>
     </Screen>
   );
 }
@@ -240,7 +241,7 @@ const s = StyleSheet.create({
 
   uploadCard: {
     minHeight: 200,
-    borderRadius: 26,
+    borderRadius: 12,
     borderWidth: 1.5,
     borderStyle: 'dashed',
     borderColor: 'rgba(214,123,176,0.4)',
@@ -281,7 +282,7 @@ const s = StyleSheet.create({
   narratorCard: {
     marginTop: 12,
     padding: 14,
-    borderRadius: 20,
+    borderRadius: 12,
     backgroundColor: colors.card,
     borderWidth: 1,
     borderColor: colors.border,
@@ -345,10 +346,13 @@ const s = StyleSheet.create({
     gap: 10,
   },
 
+  // The row holds two sibling buttons (details, save); nesting them would put a <button> inside a <button> on web.
+  bookTap: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 14 },
+
   bookRow: {
     minHeight: 92,
     padding: 11,
-    borderRadius: 20,
+    borderRadius: 12,
     backgroundColor: colors.card,
     borderWidth: 1,
     borderColor: colors.border,

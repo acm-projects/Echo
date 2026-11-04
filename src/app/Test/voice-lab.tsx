@@ -44,7 +44,7 @@ function VoiceLab() {
   };
 
   return (
-    <Screen style={s.screen}>
+    <Screen scene="neon" style={s.screen}>
       <KeyboardAvoidingView style={s.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <ScrollView contentContainerStyle={s.content} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
         <Text style={type.meta}>INTERNAL SAMPLE</Text>
@@ -76,8 +76,8 @@ const s = StyleSheet.create({
   title: { fontFamily: fonts.serif, fontSize: 34, color: colors.text, marginTop: 8 },
   intro: { marginTop: 8, marginBottom: 26, lineHeight: 21 },
   label: { ...type.meta, letterSpacing: 1.2, marginBottom: 8, marginTop: 16 },
-  input: { minHeight: 56, borderRadius: 18, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.card, color: colors.text, paddingHorizontal: 16, fontFamily: fonts.sans, fontSize: 16 },
-  textArea: { minHeight: 112, borderRadius: 18, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.card, color: colors.text, padding: 16, fontFamily: fonts.sans, fontSize: 16, textAlignVertical: 'top' },
+  input: { minHeight: 56, borderRadius: 12, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.card, color: colors.text, paddingHorizontal: 16, fontFamily: fonts.sans, fontSize: 16 },
+  textArea: { minHeight: 112, borderRadius: 12, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.card, color: colors.text, padding: 16, fontFamily: fonts.sans, fontSize: 16, textAlignVertical: 'top' },
   textInputTall: { minHeight: 150 },
   status: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 18 },
   success: { marginTop: 18, color: colors.gold },

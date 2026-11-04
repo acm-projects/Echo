@@ -23,7 +23,7 @@ export function ContinueCard({ title, chapter, timeLeft, progress, onPress }: Pr
   );
 }
 const s = StyleSheet.create({
-  card: { flexDirection: 'row', alignItems: 'center', gap: 14, padding: 14, borderRadius: 22, backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border },
-  cover: { width: 64, height: 64, borderRadius: 14 },
+  card: { flexDirection: 'row', alignItems: 'center', gap: 14, padding: 14, borderRadius: 12, backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border },
+  cover: { width: 64, height: 64, borderRadius: 10 },
   play: { width: 46, height: 46, borderRadius: 23, alignItems: 'center', justifyContent: 'center' },
 });

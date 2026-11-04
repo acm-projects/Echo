@@ -91,7 +91,7 @@ function NarratorVoices() {
   const canCreate = !creating && !limitReached && description.trim().length >= 20;
 
   return (
-    <Screen>
+    <Screen scene="neon">
       <KeyboardAvoidingView style={s.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <ScrollView contentContainerStyle={s.content} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
         <View style={s.header}>
@@ -182,24 +182,27 @@ function NarratorVoices() {
               const selected = state.selectedId === voice.id;
               const playing = playingId === voice.id && status.playing;
               return (
-                <Pressable key={voice.id} testID={`narrator-row-${voice.id}`} style={[s.voiceRow, selected && s.voiceRowSelected]} onPress={() => choose(voice)}>
-                  <Pressable testID={`narrator-play-${voice.id}`} style={[s.playButton, playing && s.playButtonActive]} onPress={() => play(voice)} hitSlop={6}>
+                // Play and choose are sibling buttons; nesting them would put a <button> inside a <button> on web.
+                <View key={voice.id} style={[s.voiceRow, selected && s.voiceRowSelected]}>
+                  <Pressable testID={`narrator-play-${voice.id}`} style={[s.playButton, playing && s.playButtonActive]} onPress={() => play(voice)} hitSlop={6} accessibilityLabel={`${playing ? 'Pause' : 'Play'} ${voice.name}`}>
                     <Ionicons name={playing ? 'pause' : 'play'} size={20} color={colors.text} style={playing ? undefined : s.playIcon} />
                   </Pressable>
-                  <View style={s.voiceInfo}>
-                    <Text style={s.voiceName} numberOfLines={1}>{voice.name}</Text>
-                    <Text style={s.voiceDescription} numberOfLines={2}>{voice.description}</Text>
-                    <Text style={s.voiceDate}>{new Date(voice.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</Text>
-                  </View>
-                  {selected ? (
-                    <View style={s.selectedBadge}>
-                      <Ionicons name="checkmark" size={14} color={colors.bg} />
-                      <Text style={s.selectedText}>Narrator</Text>
+                  <Pressable testID={`narrator-row-${voice.id}`} style={s.voiceChoose} onPress={() => choose(voice)} accessibilityRole="button">
+                    <View style={s.voiceInfo}>
+                      <Text style={s.voiceName} numberOfLines={1}>{voice.name}</Text>
+                      <Text style={s.voiceDescription} numberOfLines={2}>{voice.description}</Text>
+                      <Text style={s.voiceDate}>{new Date(voice.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</Text>
                     </View>
-                  ) : (
-                    <Text style={s.useText}>Use</Text>
-                  )}
-                </Pressable>
+                    {selected ? (
+                      <View style={s.selectedBadge}>
+                        <Ionicons name="checkmark" size={14} color={colors.bg} />
+                        <Text style={s.selectedText}>Narrator</Text>
+                      </View>
+                    ) : (
+                      <Text style={s.useText}>Use</Text>
+                    )}
+                  </Pressable>
+                </View>
               );
             })}
           </View>
@@ -226,9 +229,9 @@ const s = StyleSheet.create({
   quotaDotUsed: { backgroundColor: 'rgba(255,255,255,0.18)' },
   quotaText: { ...type.meta, color: colors.dim },
   subtitle: { ...type.body, marginTop: 5, marginBottom: 22, lineHeight: 20 },
-  card: { padding: 18, borderRadius: 24, backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border },
+  card: { padding: 18, borderRadius: 12, backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border },
   label: { ...type.meta, letterSpacing: 1.2, marginBottom: 8, marginTop: 14 },
-  input: { minHeight: 50, borderRadius: 16, borderWidth: 1, borderColor: colors.border, backgroundColor: 'rgba(0,0,0,0.18)', color: colors.text, paddingHorizontal: 14, paddingVertical: 12, fontFamily: fonts.sans, fontSize: 15 },
+  input: { minHeight: 50, borderRadius: 10, borderWidth: 1, borderColor: colors.border, backgroundColor: 'rgba(0,0,0,0.18)', color: colors.text, paddingHorizontal: 14, paddingVertical: 12, fontFamily: fonts.sans, fontSize: 15 },
   textArea: { minHeight: 104, textAlignVertical: 'top' },
   textAreaShort: { minHeight: 72, textAlignVertical: 'top' },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 10 },
@@ -238,17 +241,18 @@ const s = StyleSheet.create({
   disabled: { opacity: 0.45 },
   status: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 14 },
   hint: { ...type.meta, color: colors.dim, marginTop: 12, textAlign: 'center' },
-  error: { flexDirection: 'row', gap: 8, alignItems: 'flex-start', marginTop: 14, padding: 12, borderRadius: 14, backgroundColor: 'rgba(224,102,122,0.12)', borderWidth: 1, borderColor: 'rgba(224,102,122,0.35)' },
+  error: { flexDirection: 'row', gap: 8, alignItems: 'flex-start', marginTop: 14, padding: 12, borderRadius: 10, backgroundColor: 'rgba(224,102,122,0.12)', borderWidth: 1, borderColor: 'rgba(224,102,122,0.35)' },
   errorText: { ...type.body, flex: 1, color: colors.text },
   sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end', marginTop: 30, marginBottom: 12 },
   sectionTitle: { fontFamily: fonts.sansBold, fontSize: 21, color: colors.text },
   loading: { marginTop: 24 },
   voices: { gap: 10 },
-  voiceRow: { flexDirection: 'row', alignItems: 'center', padding: 12, borderRadius: 20, backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border },
+  voiceRow: { flexDirection: 'row', alignItems: 'center', padding: 12, borderRadius: 12, backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border },
   voiceRowSelected: { borderColor: colors.gold, backgroundColor: 'rgba(245,198,90,0.08)' },
   playButton: { width: 46, height: 46, borderRadius: 23, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(214,123,176,0.2)', borderWidth: 1, borderColor: 'rgba(214,123,176,0.45)' },
   playButtonActive: { backgroundColor: colors.pink },
   playIcon: { marginLeft: 3 },
+  voiceChoose: { flex: 1, flexDirection: 'row', alignItems: 'center' },
   voiceInfo: { flex: 1, marginHorizontal: 12 },
   voiceName: { fontFamily: fonts.sansBold, fontSize: 15, color: colors.text },
   voiceDescription: { ...type.meta, color: colors.dim, marginTop: 3, lineHeight: 16 },
@@ -256,6 +260,6 @@ const s = StyleSheet.create({
   selectedBadge: { flexDirection: 'row', alignItems: 'center', gap: 3, paddingHorizontal: 9, height: 26, borderRadius: 13, backgroundColor: colors.gold },
   selectedText: { fontFamily: fonts.sansBold, fontSize: 11, color: colors.bg },
   useText: { fontFamily: fonts.sansBold, fontSize: 13, color: colors.blue, paddingHorizontal: 6 },
-  empty: { alignItems: 'center', gap: 10, padding: 28, borderRadius: 20, borderWidth: 1, borderStyle: 'dashed', borderColor: colors.border },
+  empty: { alignItems: 'center', gap: 10, padding: 28, borderRadius: 12, borderWidth: 1, borderStyle: 'dashed', borderColor: colors.border },
   emptyText: { ...type.body, textAlign: 'center' },
 });
