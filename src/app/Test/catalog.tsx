@@ -13,7 +13,7 @@ export default function Catalog() {
   const [open, setOpen] = useState<Classic | null>(null);
 
   return (
-    <Screen scene="ember">
+    <Screen interior="harbor">
       <PageHeader title="Classics" eyebrow="PUBLIC DOMAIN" fallback="/Test/upload" />
       <ScrollView contentContainerStyle={s.page} showsVerticalScrollIndicator={false}>
         <Text style={s.intro}>Old stories with big casts. Exactly what Echo was made for.</Text>

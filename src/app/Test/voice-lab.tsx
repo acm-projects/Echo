@@ -44,7 +44,7 @@ function VoiceLab() {
   };
 
   return (
-    <Screen scene="neon" style={s.screen}>
+    <Screen interior="studio" style={s.screen}>
       <KeyboardAvoidingView style={s.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <ScrollView contentContainerStyle={s.content} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
         <Text style={type.meta}>INTERNAL SAMPLE</Text>

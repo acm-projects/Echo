@@ -6,6 +6,7 @@ import Svg, { Path } from 'react-native-svg';
 import { night, scenes, type Scene } from '../../../theme';
 import { FlyingBat } from './Bat';
 import { NightCity, type CityVariant } from './NightCity';
+import { TALL_SHARE, tallness } from './perchRegistry';
 
 export function useReducedMotion() {
   const [reduced, setReduced] = useState(false);
@@ -107,11 +108,48 @@ function Flyby({ width, height }: { width: number; height: number }) {
   );
 }
 
+// Paper lanterns drifting up through the dusk, each on its own slow schedule and sway. Purely decorative.
+function Lantern({ x, size, duration, delay, height }: { x: number; size: number; duration: number; delay: number; height: number }) {
+  const rise = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    const loop = Animated.loop(Animated.sequence([Animated.delay(delay), Animated.timing(rise, { toValue: 1, duration, easing: Easing.linear, useNativeDriver: true })]));
+    loop.start();
+    return () => loop.stop();
+  }, [delay, duration, rise]);
+  return (
+    <Animated.View
+      style={{
+        position: 'absolute',
+        left: x,
+        top: 0,
+        opacity: rise.interpolate({ inputRange: [0, 0.1, 0.8, 1], outputRange: [0, 0.9, 0.7, 0] }),
+        transform: [
+          { translateY: rise.interpolate({ inputRange: [0, 1], outputRange: [height * 0.92, height * 0.12] }) },
+          { translateX: rise.interpolate({ inputRange: [0, 0.25, 0.5, 0.75, 1], outputRange: [0, 10, -6, 8, 0] }) },
+          { rotate: rise.interpolate({ inputRange: [0, 0.5, 1], outputRange: ['-4deg', '4deg', '-3deg'] }) },
+        ],
+      }}
+    >
+      <View style={{ width: size, height: size * 1.3, borderRadius: size * 0.35, backgroundColor: '#F2A65A', alignItems: 'center', justifyContent: 'flex-end', paddingBottom: size * 0.18 }}>
+        <View style={{ width: size * 0.45, height: size * 0.45, borderRadius: size, backgroundColor: '#FFE2A8' }} />
+      </View>
+    </Animated.View>
+  );
+}
+
+const LANTERNS = [
+  { x: 0.08, size: 9, duration: 26000, delay: 0 },
+  { x: 0.3, size: 7, duration: 32000, delay: 6000 },
+  { x: 0.55, size: 11, duration: 24000, delay: 11000 },
+  { x: 0.78, size: 8, duration: 29000, delay: 3000 },
+  { x: 0.9, size: 6, duration: 35000, delay: 16000 },
+];
+
 /**
  * Full-bleed night background shared by every inner screen, painted in the screen's `scene` palette.
  * `hero` adds a taller layered city with neon and aurora, drifting with `scrollY`. Reading screens stay `calm`.
  */
-export function NightSky({ city = true, variant = 'calm', scrollY, scene = scenes.midnight }: { city?: boolean; variant?: CityVariant; scrollY?: Animated.Value; scene?: Scene }) {
+export function NightSky({ city = true, variant = 'calm', scrollY, scene = scenes.midnight, record = false, lanterns = false }: { city?: boolean; variant?: CityVariant; scrollY?: Animated.Value; scene?: Scene; record?: boolean; lanterns?: boolean }) {
   const { width, height } = useWindowDimensions();
   const reduced = useReducedMotion();
   const hero = variant === 'hero';
@@ -121,8 +159,15 @@ export function NightSky({ city = true, variant = 'calm', scrollY, scene = scene
       <LinearGradient colors={scene.sky} locations={[0, 0.6, 1]} style={StyleSheet.absoluteFill} />
       {hero && !reduced && <Aurora width={width} height={height} color={scene.glow} />}
       {STARS.map(([x, y, r, tw], i) => <Star key={i} x={x} y={y} r={r} twinkle={tw && !reduced} delay={i * 400} />)}
+      {lanterns && !reduced && LANTERNS.map((l, i) => <Lantern key={i} {...l} x={l.x * width} height={height} />)}
       {!reduced && <Flyby width={width} height={height} />}
-      {city && <NightCity width={width} height={cityHeight} animated={!reduced} variant={variant} scrollY={scrollY} scene={scene} />}
+      {city && <NightCity width={width} height={cityHeight} animated={!reduced} variant={variant} scrollY={scrollY} scene={scene} record={record} />}
+      {/* The big skyline tab trips fly over: hidden until BatTransition fades it in, under the page content */}
+      {record && (
+        <Animated.View style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: height * TALL_SHARE, opacity: tallness }}>
+          <NightCity width={width} height={height * TALL_SHARE} animated={false} variant="hero" scene={scene} />
+        </Animated.View>
+      )}
     </View>
   );
 }
@@ -141,7 +186,7 @@ export function CityHero({ height, scrollY, scene = scenes.dusk, children }: { h
       <LinearGradient colors={['rgba(0,0,0,0)', scene.sky[2]]} locations={[0.3, 0.85]} style={StyleSheet.absoluteFill} />
       {!reduced && <Aurora width={width} height={height * 1.6} color={scene.glow} />}
       {!reduced && <Flyby width={width} height={height * 1.4} />}
-      <NightCity width={width} height={height * 0.62} animated={!reduced} variant="hero" scrollY={scrollY} scene={scene} />
+      <NightCity width={width} height={height * 0.62} animated={!reduced} variant="hero" scrollY={scrollY} scene={scene} record />
       {/* Fades the skyline's foot into the page so the content below doesn't sit on a hard edge */}
       <LinearGradient colors={['rgba(0,0,0,0)', scene.sky[1]]} style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: 36 }} />
       <View style={{ position: 'absolute', left: 0, right: 0, top: 0 }}>{children}</View>

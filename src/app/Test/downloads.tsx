@@ -6,7 +6,7 @@ import { EmptyState } from '../../components/EmptyState';
 // Offline downloads aren't built yet; this page tells the truth instead of showing a broken list.
 export default function Downloads() {
   return (
-    <Screen>
+    <Screen interior="radioroom">
       <PageHeader title="Downloads" fallback="/Test/profile" />
       <EmptyState
         title="Nothing saved for offline yet"

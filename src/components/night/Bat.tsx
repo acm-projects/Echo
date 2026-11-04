@@ -21,24 +21,31 @@ function Wing({ mirrored }: { mirrored?: boolean }) {
   );
 }
 
-function FlyingBody() {
+function FlyingBody({ away }: { away?: boolean }) {
   return (
     <Svg width="100%" height="100%" viewBox="0 0 60 70">
       <Path d="M18 20 L13 1 L29 13 Z" fill={night.batBody} />
       <Path d="M42 20 L47 1 L31 13 Z" fill={night.batBody} />
-      <Path d="M19 17 L16 6 L25 13 Z" fill={night.batEar} />
-      <Path d="M41 17 L44 6 L35 13 Z" fill={night.batEar} />
+      {!away && <Path d="M19 17 L16 6 L25 13 Z" fill={night.batEar} />}
+      {!away && <Path d="M41 17 L44 6 L35 13 Z" fill={night.batEar} />}
       <Ellipse cx={30} cy={46} rx={11} ry={16} fill={night.batBody} />
       <Circle cx={30} cy={26} r={14} fill={night.batBody} />
-      <Path d="M22 25 q3 3 6 0 M32 25 q3 3 6 0" stroke={EYE} strokeWidth={1.8} fill="none" strokeLinecap="round" />
-      <Ellipse cx={21} cy={31} rx={2.6} ry={1.6} fill={night.batEar} opacity={0.55} />
-      <Ellipse cx={39} cy={31} rx={2.6} ry={1.6} fill={night.batEar} opacity={0.55} />
+      {away ? (
+        // Seen from behind: no face, just the back of the head and a soft line down the spine.
+        <Path d="M30 18 V58" stroke={night.batWingDark} strokeWidth={1.6} opacity={0.6} />
+      ) : (
+        <>
+          <Path d="M22 25 q3 3 6 0 M32 25 q3 3 6 0" stroke={EYE} strokeWidth={1.8} fill="none" strokeLinecap="round" />
+          <Ellipse cx={21} cy={31} rx={2.6} ry={1.6} fill={night.batEar} opacity={0.55} />
+          <Ellipse cx={39} cy={31} rx={2.6} ry={1.6} fill={night.batEar} opacity={0.55} />
+        </>
+      )}
     </Svg>
   );
 }
 
-/** A bat with flapping wings. `size` is the wingspan; height is 60% of it. */
-export function FlyingBat({ size, flapMs = 260, glow, style }: { size: number; flapMs?: number; glow?: boolean; style?: ViewStyle }) {
+/** A bat with flapping wings. `size` is the wingspan; height is 60% of it. `away` shows it from behind. */
+export function FlyingBat({ size, flapMs = 260, glow, away, style }: { size: number; flapMs?: number; glow?: boolean; away?: boolean; style?: ViewStyle }) {
   const flap = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
@@ -69,7 +76,7 @@ export function FlyingBat({ size, flapMs = 260, glow, style }: { size: number; f
         <Wing mirrored />
       </Animated.View>
       <View style={{ position: 'absolute', left: size / 2 - size * 0.15, top: -size * 0.03, width: size * 0.3, height: size * 0.35 }}>
-        <FlyingBody />
+        <FlyingBody away={away} />
       </View>
     </Animated.View>
   );

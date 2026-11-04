@@ -162,7 +162,7 @@ export default function Login() {
         return;
       }
 
-      router.replace('/Test/player');
+      router.replace('/Test/library');
     } catch {
       notify(
         'Something went wrong',

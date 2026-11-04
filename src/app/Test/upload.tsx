@@ -4,14 +4,14 @@ import * as DocumentPicker from 'expo-document-picker';
 import { useCallback, useState } from 'react';
 import { router, useFocusEffect } from 'expo-router';
 
-import { Screen } from '../../../components/Screen';
-import { colors, fonts, type } from '../../../../theme';
-import { getNarrators } from '../../../data/narrators';
-import { processBook } from '../../../data/bookJobs';
-import { notify } from '../../../../lib/notify';
-import { Sheet } from '../../../components/Sheet';
-import { ClassicSheet } from '../../../components/ClassicSheet';
-import { CLASSICS, useSavedClassics, type Classic } from '../../../data/catalog';
+import { Screen } from '../../components/Screen';
+import { colors, fonts, type } from '../../../theme';
+import { getNarrators } from '../../data/narrators';
+import { processBook } from '../../data/bookJobs';
+import { notify } from '../../../lib/notify';
+import { Sheet } from '../../components/Sheet';
+import { ClassicSheet } from '../../components/ClassicSheet';
+import { CLASSICS, useSavedClassics, type Classic } from '../../data/catalog';
 
 // The first few classics; See All opens the full catalog.
 const PUBLIC_DOMAIN_BOOKS = CLASSICS.slice(0, 4);
@@ -59,20 +59,23 @@ export default function Upload() {
         contentContainerStyle={s.content}
       >
         <View style={s.header}>
-          <View>
+          <Pressable style={s.back} onPress={() => (router.canGoBack() ? router.back() : router.replace('/Test/library'))} accessibilityRole="button" accessibilityLabel="Go back" hitSlop={8}>
+            <Ionicons name="chevron-back" size={20} color={colors.text} />
+          </Pressable>
+          <View style={{ flex: 1 }}>
             <Text style={type.h1}>Add a Book</Text>
             <Text style={s.subtitle}>
               Upload your own or discover something new.
             </Text>
           </View>
 
-          <Pressable style={s.help} onPress={() => setHelpOpen(true)} accessibilityRole="button" accessibilityLabel="How uploading works">
-            <Ionicons
-              name="help"
-              size={18}
-              color={colors.dim}
-            />
-          </Pressable>
+            <Pressable style={s.help} onPress={() => setHelpOpen(true)} accessibilityRole="button" accessibilityLabel="How uploading works">
+              <Ionicons
+                name="help"
+                size={18}
+                color={colors.dim}
+              />
+            </Pressable>
         </View>
 
         <Pressable style={s.uploadCard} onPress={selectAndProcess} disabled={processing}>
@@ -112,9 +115,9 @@ export default function Upload() {
 
         <View style={s.sectionHeader}>
           <View>
-            <Text style={s.sectionTitle}>
-              Public Domain
-            </Text>
+              <Text style={s.sectionTitle}>
+                Public Domain
+              </Text>
 
             <Text style={s.sectionDescription}>
               Books ready to add to your library
@@ -210,6 +213,7 @@ export default function Upload() {
 }
 
 const s = StyleSheet.create({
+  back: { width: 40, height: 40, borderRadius: 20, backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border, alignItems: 'center', justifyContent: 'center', marginRight: 12, marginTop: 2 },
   content: {
     padding: 20,
     paddingBottom: 150,

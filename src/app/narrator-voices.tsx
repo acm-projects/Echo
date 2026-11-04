@@ -7,6 +7,7 @@ import { useAudioPlayer, useAudioPlayerStatus } from 'expo-audio';
 import { Screen } from '../components/Screen';
 import { GradientButton } from '../components/GradientButton';
 import { ClientOnly } from '../../lib/ClientOnly';
+import { CityLoader } from '../components/CityLoader';
 import { colors, fonts, type } from '../../theme';
 import { createNarrator, getNarrators, narratorPreviewUri, selectNarrator, type NarratorState, type NarratorVoice } from '../data/narrators';
 
@@ -91,7 +92,7 @@ function NarratorVoices() {
   const canCreate = !creating && !limitReached && description.trim().length >= 20;
 
   return (
-    <Screen scene="neon">
+    <Screen interior="studio">
       <KeyboardAvoidingView style={s.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <ScrollView contentContainerStyle={s.content} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
         <View style={s.header}>
@@ -175,7 +176,7 @@ function NarratorVoices() {
         </View>
 
         {loading && !state ? (
-          <ActivityIndicator color={colors.gold} style={s.loading} />
+          <CityLoader scene="neon" label="Warming up the voices…" />
         ) : state?.voices.length ? (
           <View style={s.voices}>
             {state.voices.map((voice) => {

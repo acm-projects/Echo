@@ -39,7 +39,7 @@ export default function Search() {
       : router.push({ pathname: '/Test/book_details', params: { id: r.id, title: r.title, author: r.subtitle } });
 
   return (
-    <Screen scene="aurora">
+    <Screen interior="bookshop">
       <PageHeader title="Search" fallback="/Test/library" />
       <View style={s.field}>
         <Ionicons name="search" size={18} color={colors.dim} />

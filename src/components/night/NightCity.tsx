@@ -1,8 +1,11 @@
-import { memo, useEffect, useMemo, useRef } from 'react';
+import React, { memo, useCallback, useEffect, useMemo, useRef } from 'react';
 import { Animated, Easing, View } from 'react-native';
 import Svg, { Path, Rect } from 'react-native-svg';
-import { night, scenes, type Scene } from '../../../theme';
-import { HangingBat } from './Bat';
+import { useFocusEffect } from 'expo-router';
+import { night, scenes, type Scene, type SceneName } from '../../../theme';
+import { CityBat } from './RoamingBat';
+import { LANDMARK_CLEARANCE, Landmark, landmarkDoor, landmarkPerch, landmarkX } from './Landmarks';
+import { departing, recordCity, recordSpots, tallness } from './perchRegistry';
 
 type Window = { x: number; y: number; h: number; lit: boolean; tint: string };
 type Roof = 'flat' | 'setback' | 'spire' | 'pitched' | 'dome' | 'slant' | 'crown' | 'tank' | 'plant';
@@ -22,20 +25,20 @@ function seeded(seed: number) {
 
 const WIN = 4;
 const GAP = 5;
-// Roofs weighted toward ordinary buildings, with the odd landmark, like a real downtown.
-const ROOFS: Roof[] = ['flat', 'flat', 'flat', 'setback', 'setback', 'tank', 'plant', 'slant', 'pitched', 'crown', 'dome', 'spire'];
 
-function skyline(width: number, height: number, seed: number, minH: number, maxH: number, litChance: number, neonChance: number, palette: readonly string[]) {
+// `roofs` is the scene's mix (repeats weight a style). Buildings near `quietX` stay low so the landmark stays visible.
+function skyline(width: number, height: number, seed: number, minH: number, maxH: number, litChance: number, neonChance: number, palette: readonly string[], roofs: readonly string[], quietX: number | null = null) {
   const rand = seeded(seed);
   const buildings: Building[] = [];
   let x = -6;
   while (x < width + 6) {
-    const roof = ROOFS[Math.floor(rand() * ROOFS.length)];
+    const roof = roofs[Math.floor(rand() * roofs.length)] as Roof;
     // Landmarks run a little wider; spires and pitched roofs stay slim.
     const w = (roof === 'dome' || roof === 'crown' ? 34 : roof === 'spire' || roof === 'pitched' ? 20 : 22) + Math.floor(rand() * 32);
     const feature = roof === 'spire' ? 18 + rand() * 20 : roof === 'setback' || roof === 'crown' ? 8 + rand() * 14 : roof === 'pitched' ? w * 0.38 : roof === 'dome' ? w * 0.3 : roof === 'slant' ? 6 + rand() * 12 : 10;
     // Keep the whole silhouette, roof included, inside the layer.
-    const h = Math.min(minH + Math.floor(rand() * (maxH - minH)), height - feature - 2);
+    const quiet = quietX !== null && x < quietX + LANDMARK_CLEARANCE && x + w > quietX - LANDMARK_CLEARANCE;
+    const h = Math.min(minH + Math.floor(rand() * (maxH - minH)), height - feature - 2, quiet ? height * 0.3 : Infinity);
     // Most buildings use the scene's main light; a few glow in its second colour or in neon.
     const roll = rand();
     const tint = roll < neonChance ? (rand() < 0.5 ? night.neonCyan : night.neonPink) : roll < 0.35 ? palette[1] ?? palette[0] : palette[0];
@@ -100,11 +103,76 @@ function antennaBuilding(buildings: Building[], width: number) {
   return { x: best.x + best.w / 2, roofTop };
 }
 
-/** Where the antenna crossbar sits (relative to the city's top-left) for a calm skyline of this size. */
-export function antennaPoint(width: number, height: number) {
-  const near = skyline(width, height, 19, height * 0.2, height * 0.6, 0.22, 0.04, scenes.midnight.windows);
+// The three skylines for a scene. Every caller builds them the same way, so perch positions always line up.
+function layers(scene: Scene, width: number, height: number, hero: boolean) {
+  const { seed, tall, roofs } = scene.city;
+  const quietX = landmarkX(width);
+  return {
+    far: skyline(width, height, seed + 7, height * 0.45, height * Math.min(0.95, tall + 0.3), 0.12, 0, scene.windows, roofs),
+    mid: hero ? skyline(width, height, seed + 13, height * 0.3, height * Math.min(0.85, tall + 0.15), 0.16, 0.18, scene.windows, roofs, quietX) : [],
+    near: skyline(width, height, seed, height * 0.18, height * tall, 0.22, hero ? 0.14 : 0.04, scene.windows, roofs, quietX),
+  };
+}
+
+/**
+ * The skyline spot the mascot lands on in this city (top-left of a <HangingBat>, relative to the city): its landmark,
+ * or the rooftop antenna. Screens whose bat usually sleeps on a button still land on the skyline first.
+ */
+export function cityPerch(scene: Scene, width: number, height: number, hero = false) {
+  if (scene.perch === 'landmark') return landmarkPerch(scene.landmark, { width, height });
+  const a = antennaBuilding(layers(scene, width, height, hero).near, width);
+  return { x: a.x + 2, y: height - a.roofTop - 21 };
+}
+
+/**
+ * Every place in this city the bat can hang from, the landing perch first: the landmark, the antenna, and the edges of
+ * a few flat rooftops spread across the skyline. `layer` says which building layer it sits on, so on scrolling heroes
+ * the bat moves with that layer's parallax and stays put on its building.
+ */
+export type CitySpot = { x: number; y: number; layer: 'landmark' | 'near' };
+export function citySpots(scene: Scene, width: number, height: number, hero = false): CitySpot[] {
+  const { near } = layers(scene, width, height, hero);
   const a = antennaBuilding(near, width);
-  return { x: a.x, y: height - a.roofTop - 22 };
+  const antenna: CitySpot = { x: a.x + 2, y: height - a.roofTop - 21, layer: 'near' };
+  const out: CitySpot[] = [{ ...cityPerch(scene, width, height, hero), layer: scene.perch === 'landmark' ? 'landmark' : 'near' }];
+  if (scene.perch === 'landmark') out.push(antenna);
+  // Roof edges: the corner of a flat roof, a little in from the side, well apart from each other and the antenna.
+  const roofs = near.filter((b) => (b.roof === 'flat' || b.roof === 'plant') && b.w > 26 && b.x > 16 && b.x + b.w < width - 16 && b.h > height * 0.25);
+  for (const b of roofs) {
+    const spot: CitySpot = { x: b.x + b.w - 14, y: height - b.h + 1, layer: 'near' };
+    if (out.every((o) => Math.abs(o.x - spot.x) > width * 0.16)) out.push(spot);
+    if (out.length >= 5) break;
+  }
+  return out;
+}
+
+type ViewRef = React.ComponentRef<typeof View>;
+
+const nameOf = (scene: Scene) => (Object.keys(scenes) as SceneName[]).find((k) => scenes[k] === scene);
+
+// Records where this city (and its perch) sits on screen each time the screen is focused, for BatTransition.
+function Recorder({ target, scene, hero, spots }: { target: React.RefObject<ViewRef | null>; scene: Scene; hero: boolean; spots: CitySpot[] }) {
+  const measure = useCallback(() => {
+    const name = nameOf(scene);
+    if (!name) return;
+    // Wait a frame so layout (and any scroll restore) has settled.
+    requestAnimationFrame(() =>
+      target.current?.measureInWindow((x, y, width, height) => {
+        if (!width) return;
+        recordCity(name, { x, y, width, height, hero });
+        recordSpots(name, 'city', spots.map((s) => ({ x: x + s.x, y: y + s.y })));
+      })
+    );
+  }, [hero, scene, spots, target]);
+  // Re-check while focused: scrolling the page moves the city and its spots.
+  useFocusEffect(
+    useCallback(() => {
+      measure();
+      const timer = setInterval(measure, 150);
+      return () => clearInterval(timer);
+    }, [measure])
+  );
+  return null;
 }
 
 const Layer = memo(function Layer({ buildings, width, height, fill, windowOpacity, windowScale = 1 }: { buildings: Building[]; width: number; height: number; fill: string; windowOpacity: number; windowScale?: number }) {
@@ -167,14 +235,17 @@ function parallax(scrollY: Animated.Value | undefined, rate: number, max: number
 }
 
 /**
- * Night skyline pinned to the bottom of its parent. `calm` is a single quiet skyline for reading screens;
- * `hero` adds a third layer, neon signs and parallax (pass the screen's scroll value as `scrollY`).
+ * Night skyline pinned to the bottom of its parent, with the scene's landmark in the back. `calm` is a single quiet
+ * skyline for reading screens; `hero` adds a third layer, neon signs and parallax (pass the screen's scroll value).
+ * The mascot itself is drawn by RoamingBat, not here. `record` is set by screens so RoamingBat and BatTransition know
+ * where this city and its spots are.
  */
-export function NightCity({ width, height = 150, animated = true, variant = 'calm', scrollY, scene = scenes.midnight, perched = true }: { width: number; height?: number; animated?: boolean; variant?: CityVariant; scrollY?: Animated.Value; scene?: Scene; perched?: boolean }) {
+export function NightCity({ width, height = 150, animated = true, variant = 'calm', scrollY, scene = scenes.midnight, record = false }: { width: number; height?: number; animated?: boolean; variant?: CityVariant; scrollY?: Animated.Value; scene?: Scene; record?: boolean }) {
   const hero = variant === 'hero';
-  const far = useMemo(() => skyline(width, height, 7, height * 0.5, height * 0.95, 0.12, 0, scene.windows), [width, height, scene]);
-  const mid = useMemo(() => (hero ? skyline(width, height, 13, height * 0.35, height * 0.78, 0.16, 0.18, scene.windows) : []), [hero, width, height, scene]);
-  const near = useMemo(() => skyline(width, height, 19, height * 0.2, height * 0.6, 0.22, hero ? 0.14 : 0.04, scene.windows), [hero, width, height, scene]);
+  const { far, mid, near } = useMemo(() => layers(scene, width, height, hero), [hero, width, height, scene]);
+  const spots = useMemo(() => citySpots(scene, width, height, hero), [hero, width, height, scene]);
+  const door = useMemo(() => landmarkDoor(scene.landmark, { width, height }), [height, scene, width]);
+  const root = useRef<ViewRef>(null);
 
   const antenna = useMemo(() => antennaBuilding(near, width), [near, width]);
   const flicker = useMemo(() => {
@@ -192,9 +263,18 @@ export function NightCity({ width, height = 150, animated = true, variant = 'cal
   const antennaTop = height - antenna.roofTop - 26;
 
   return (
-    <View pointerEvents="none" style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height }}>
+    // A screen's own city (`record`) eases down and fades when you leave it for a building, and cross-fades with the
+    // big skyline (`tallness`) during tab trips.
+    <Animated.View ref={root} pointerEvents="none" style={[{ position: 'absolute', left: 0, right: 0, bottom: 0, height }, record && { opacity: Animated.multiply(departing.interpolate({ inputRange: [0, 1], outputRange: [1, 0] }), tallness.interpolate({ inputRange: [0, 1], outputRange: [1, 0] })), transform: [{ translateY: departing.interpolate({ inputRange: [0, 1], outputRange: [0, 36] }) }] }]}>
+      {record && <Recorder target={root} scene={scene} hero={hero} spots={spots} />}
       <Animated.View style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height, transform: [{ translateY: parallax(scrollY, 0.12, height * 0.3) }] }}>
         <Layer buildings={far} width={width} height={height} fill={scene.far} windowOpacity={0.5} windowScale={0.8} />
+      </Animated.View>
+      {/* The landmark stands behind the nearer buildings, which are kept low around it */}
+      <Animated.View style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height, transform: [{ translateY: parallax(scrollY, 0.2, height * 0.4) }] }}>
+        <Landmark scene={scene} width={width} height={height} animated={animated} />
+        {/* The door the bat flies through when you open a page from this screen */}
+        <View style={{ position: 'absolute', left: door.x - 4, top: door.y - 6, width: 8, height: 12, borderTopLeftRadius: 4, borderTopRightRadius: 4, backgroundColor: night.window, opacity: 0.9 }} />
       </Animated.View>
       {hero && (
         <Animated.View style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height, transform: [{ translateY: parallax(scrollY, 0.25, height * 0.5) }] }}>
@@ -209,9 +289,9 @@ export function NightCity({ width, height = 150, animated = true, variant = 'cal
         <View style={{ position: 'absolute', left: antennaX - 1, top: antennaTop, width: 2, height: 26, backgroundColor: scene.near }} />
         <View style={{ position: 'absolute', left: antennaX - 12, top: antennaTop + 4, width: 24, height: 2, borderRadius: 1, backgroundColor: scene.near }} />
         <View style={{ position: 'absolute', left: antennaX - 2, top: antennaTop - 3, width: 4, height: 4, borderRadius: 2, backgroundColor: night.neonPink }} />
-        {/* `perched={false}` when BatTransition is animating the mascot itself */}
-        {perched && <HangingBat size={13} style={{ position: 'absolute', left: antennaX + 2, top: antennaTop + 5 }} />}
       </Animated.View>
-    </View>
+      {/* The mascot lives in the live city, so it scrolls with it and sits behind the page content */}
+      {record && <CityBat scene={scene} spots={spots} shift={{ landmark: parallax(scrollY, 0.2, height * 0.4), near: parallax(scrollY, 0.45, height * 0.8) }} />}
+    </Animated.View>
   );
 }

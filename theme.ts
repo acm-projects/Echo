@@ -25,6 +25,7 @@ export const night = {
   batEar: '#E59BC0',
 };
 // Each screen gets its own night. Same city and mascot, different sky, horizon glow and window light.
+export type Landmark = 'billboard' | 'lighthouse' | 'marquee' | 'clocktower' | 'radiotower' | 'ferris';
 export type Scene = {
   sky: readonly [string, string, string];
   far: string;
@@ -33,14 +34,20 @@ export type Scene = {
   windows: readonly string[];
   glow: string;
   accent: string;
+  // The shape of this city: its own random seed, how tall it builds, and which roofs it favours.
+  city: { seed: number; tall: number; roofs: readonly string[] };
+  // One animated building at the back of the skyline that makes the place recognisable.
+  landmark: Landmark;
+  // Where the mascot sleeps on this screen: on the landmark, the rooftop antenna, or a button the screen provides.
+  perch: 'landmark' | 'antenna' | 'button';
 };
 export const scenes = {
-  dusk: { sky: ['#0B1030', '#2E1B5E', '#C65A74'], far: '#3D2463', mid: '#2A1849', near: '#150D2C', windows: ['#F5C65A', '#FF9A7A'], glow: '#FF8A7A', accent: '#FF9A7A' },
-  tidewater: { sky: ['#03141D', '#0A3140', '#1E7279'], far: '#0F3D4A', mid: '#0A2C38', near: '#051A23', windows: ['#7FF0F0', '#F5C65A'], glow: '#5FE3D4', accent: '#5FE3D4' },
-  ember: { sky: ['#100A1C', '#3A1530', '#C8703A'], far: '#4A2436', mid: '#33192A', near: '#1B0E19', windows: ['#FFB45E', '#F5C65A'], glow: '#FFB45E', accent: '#FFB45E' },
-  neon: { sky: ['#0A0418', '#2B0A44', '#A8248F'], far: '#3B1458', mid: '#290D41', near: '#150626', windows: ['#FF6FD0', '#62E6F0'], glow: '#FF6FD0', accent: '#FF6FD0' },
-  midnight: { sky: ['#030818', '#0C1B45', '#2A4A88'], far: '#16295A', mid: '#0F1F45', near: '#08122B', windows: ['#FFE9A8', '#9CC2FF'], glow: '#8FB8FF', accent: '#9CC2FF' },
-  aurora: { sky: ['#020C14', '#0A2A2F', '#2C7E66'], far: '#123B37', mid: '#0C2B2A', near: '#061A1B', windows: ['#7CF2B8', '#F5C65A'], glow: '#7CF2B8', accent: '#7CF2B8' },
+  dusk: { sky: ['#0B1030', '#2E1B5E', '#C65A74'], far: '#3D2463', mid: '#2A1849', near: '#150D2C', windows: ['#F5C65A', '#FF9A7A'], glow: '#FF8A7A', accent: '#FF9A7A', city: { seed: 19, tall: 0.62, roofs: ['flat', 'flat', 'setback', 'tank', 'plant', 'slant', 'crown', 'dome', 'spire'] }, landmark: 'billboard', perch: 'landmark' },
+  tidewater: { sky: ['#03141D', '#0A3140', '#1E7279'], far: '#0F3D4A', mid: '#0A2C38', near: '#051A23', windows: ['#7FF0F0', '#F5C65A'], glow: '#5FE3D4', accent: '#5FE3D4', city: { seed: 53, tall: 0.46, roofs: ['flat', 'pitched', 'pitched', 'tank', 'tank', 'slant', 'plant'] }, landmark: 'lighthouse', perch: 'button' },
+  ember: { sky: ['#100A1C', '#3A1530', '#C8703A'], far: '#4A2436', mid: '#33192A', near: '#1B0E19', windows: ['#FFB45E', '#F5C65A'], glow: '#FFB45E', accent: '#FFB45E', city: { seed: 97, tall: 0.52, roofs: ['pitched', 'pitched', 'flat', 'tank', 'dome', 'crown', 'plant'] }, landmark: 'clocktower', perch: 'landmark' },
+  neon: { sky: ['#0A0418', '#2B0A44', '#A8248F'], far: '#3B1458', mid: '#290D41', near: '#150626', windows: ['#FF6FD0', '#62E6F0'], glow: '#FF6FD0', accent: '#FF6FD0', city: { seed: 71, tall: 0.72, roofs: ['setback', 'setback', 'spire', 'crown', 'flat', 'plant', 'slant'] }, landmark: 'marquee', perch: 'landmark' },
+  midnight: { sky: ['#030818', '#0C1B45', '#2A4A88'], far: '#16295A', mid: '#0F1F45', near: '#08122B', windows: ['#FFE9A8', '#9CC2FF'], glow: '#8FB8FF', accent: '#9CC2FF', city: { seed: 131, tall: 0.7, roofs: ['flat', 'setback', 'setback', 'spire', 'slant', 'slant', 'plant'] }, landmark: 'radiotower', perch: 'button' },
+  aurora: { sky: ['#020C14', '#0A2A2F', '#2C7E66'], far: '#123B37', mid: '#0C2B2A', near: '#061A1B', windows: ['#7CF2B8', '#F5C65A'], glow: '#7CF2B8', accent: '#7CF2B8', city: { seed: 151, tall: 0.58, roofs: ['dome', 'spire', 'pitched', 'flat', 'flat', 'plant', 'crown'] }, landmark: 'ferris', perch: 'antenna' },
 } satisfies Record<string, Scene>;
 export type SceneName = keyof typeof scenes;
 

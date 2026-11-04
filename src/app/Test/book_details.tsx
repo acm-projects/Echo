@@ -70,7 +70,7 @@ export default function BookDetailsScreen() {
 
   const play = (chapter: DisplayChapter) => {
     playback.load({ title, author, chapter: chapter.title, chapterNumber: chapter.number });
-    router.navigate('/Test/player');
+    router.push('/Test/player');
   };
 
   const toggleChapters = () => {
@@ -81,7 +81,7 @@ export default function BookDetailsScreen() {
   const visible = showAll ? chapterList : chapterList.slice(Math.max(0, current.number - 1), current.number + 3);
 
   return (
-    <Screen scene="dusk">
+    <Screen interior="bookshop">
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={s.page}>
         <View style={s.topBar}>
           <Pressable style={s.iconButton} onPress={() => (router.canGoBack() ? router.back() : router.replace('/Test/library'))} accessibilityLabel="Go back">

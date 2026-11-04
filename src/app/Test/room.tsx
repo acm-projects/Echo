@@ -43,7 +43,7 @@ export default function Room() {
   };
 
   return (
-    <Screen scene="aurora">
+    <Screen interior="cafe">
       <PageHeader title={params.title ?? 'Book room'} eyebrow="BOOK ROOM" fallback="/Test/community" />
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
         <ScrollView contentContainerStyle={s.page} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">

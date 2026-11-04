@@ -22,7 +22,7 @@ export default function SettingsScreen() {
   };
 
   return (
-    <Screen city={false}>
+    <Screen interior="radioroom" city={false}>
       <PageHeader title="Settings" eyebrow="LISTENING" fallback="/Test/profile" />
       <ScrollView ref={scroll} contentContainerStyle={s.page} showsVerticalScrollIndicator={false}>
         <Group title="Playback" icon="options-outline" onY={mark('playback')} highlight={section === 'playback'}>

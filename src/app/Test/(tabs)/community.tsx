@@ -109,9 +109,9 @@ function BookRooms() {
     <View>
       <View style={s.sectionHeader}>
         <View>
-          <Text style={s.sectionTitle}>
-            Your Book Rooms
-          </Text>
+            <Text style={s.sectionTitle}>
+              Your Book Rooms
+            </Text>
 
           <Text style={s.sectionSubtitle}>
             Discuss the books you're reading

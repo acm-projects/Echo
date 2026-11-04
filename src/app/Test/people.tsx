@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { Screen } from '../../components/Screen';
@@ -10,6 +10,7 @@ import { colors, fonts, type } from '../../../theme';
 import { supabase } from '../../../lib/supabase';
 import { notify } from '../../../lib/notify';
 import { acceptFriendRequest, declineFriendRequest, getMyFriendships, searchUsers, sendFriendRequest, type MyFriendships, type UserSearchResult } from '../../../lib/db/friends';
+import { CityLoader } from '../../components/CityLoader';
 
 type Person = { id: string; username: string | null; display_name: string | null };
 
@@ -56,7 +57,7 @@ export default function People() {
   const known = new Set([...(data?.friends ?? []), ...(data?.outgoingRequests ?? []), ...(data?.incomingRequests ?? [])].map((f) => f.other_user.id));
 
   return (
-    <Screen scene="aurora">
+    <Screen interior="cafe">
       <PageHeader title="People" eyebrow="FRIENDS" fallback="/Test/community" />
       <View style={s.field}>
         <Ionicons name="person-add-outline" size={18} color={colors.dim} />
@@ -83,7 +84,7 @@ export default function People() {
         ) : error ? (
           <EmptyState title="Couldn't reach your friends" body={error.includes('authenticated') ? 'Sign in to see and add friends.' : error} action={error.includes('authenticated') ? 'Sign in' : 'Try again'} onAction={error.includes('authenticated') ? () => router.push('/Test/login') : load} />
         ) : !data ? (
-          <ActivityIndicator color={colors.pink} style={{ marginTop: 40 }} />
+          <CityLoader scene="ember" label="Looking for your friends…" />
         ) : (
           <>
             {data.incomingRequests.length > 0 && <Text style={s.section}>WANTS TO CONNECT</Text>}

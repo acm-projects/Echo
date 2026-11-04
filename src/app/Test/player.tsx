@@ -3,14 +3,14 @@ import { Animated, Easing, Pressable, ScrollView, StyleSheet, Text, View } from 
 import { router } from 'expo-router';
 import Svg, { Path } from 'react-native-svg';
 import { Ionicons } from '@expo/vector-icons';
-import { Screen } from '../../../components/Screen';
-import { ProgressBar } from '../../../components/ProgressBar';
-import { Sheet, SheetItem } from '../../../components/Sheet';
-import { FlyingBat, HangingBat } from '../../../components/night/Bat';
-import { useReducedMotion } from '../../../components/night/NightSky';
-import { colors, fonts, radius, scenes, type } from '../../../../theme';
-import { formatTime, playback, useNowPlaying } from '../../../data/playback';
-import { useSettings } from '../../../data/settings';
+import { Screen } from '../../components/Screen';
+import { ProgressBar } from '../../components/ProgressBar';
+import { Sheet, SheetItem } from '../../components/Sheet';
+import { FlyingBat, HangingBat } from '../../components/night/Bat';
+import { useReducedMotion } from '../../components/night/NightSky';
+import { colors, fonts, radius, scenes, type } from '../../../theme';
+import { formatTime, playback, useNowPlaying } from '../../data/playback';
+import { useSettings } from '../../data/settings';
 
 const SPEEDS = [0.8, 1, 1.25, 1.5, 2];
 const neon = scenes.neon;
@@ -133,19 +133,19 @@ export default function Player() {
           </Pressable>
         </View>
 
-        <View style={s.extras}>
-          <Pressable onPress={nextSpeed} style={s.pill} accessibilityRole="button" accessibilityLabel="Playback speed">
-            <Text style={s.pillText}>{now.speed}×</Text>
-          </Pressable>
-          <Pressable onPress={() => update('sleepTimerMinutes', settings.sleepTimerMinutes ? 0 : 30)} style={[s.pill, settings.sleepTimerMinutes > 0 && s.pillOn]} accessibilityRole="button" accessibilityLabel="Sleep timer">
-            <Ionicons name="moon-outline" size={14} color={settings.sleepTimerMinutes ? '#14102A' : colors.text} />
-            <Text style={[s.pillText, settings.sleepTimerMinutes > 0 && { color: '#14102A' }]}>{settings.sleepTimerMinutes ? `${settings.sleepTimerMinutes}m` : 'Sleep'}</Text>
-          </Pressable>
-          <Pressable onPress={() => router.push({ pathname: '/Test/book_details', params: { title: now.title, author: now.author } })} style={s.pill} accessibilityRole="button">
-            <Ionicons name="people-outline" size={14} color={colors.text} />
-            <Text style={s.pillText}>Cast</Text>
-          </Pressable>
-        </View>
+          <View style={s.extras}>
+            <Pressable onPress={nextSpeed} style={s.pill} accessibilityRole="button" accessibilityLabel="Playback speed">
+              <Text style={s.pillText}>{now.speed}×</Text>
+            </Pressable>
+            <Pressable onPress={() => update('sleepTimerMinutes', settings.sleepTimerMinutes ? 0 : 30)} style={[s.pill, settings.sleepTimerMinutes > 0 && s.pillOn]} accessibilityRole="button" accessibilityLabel="Sleep timer">
+              <Ionicons name="moon-outline" size={14} color={settings.sleepTimerMinutes ? '#14102A' : colors.text} />
+              <Text style={[s.pillText, settings.sleepTimerMinutes > 0 && { color: '#14102A' }]}>{settings.sleepTimerMinutes ? `${settings.sleepTimerMinutes}m` : 'Sleep'}</Text>
+            </Pressable>
+            <Pressable onPress={() => router.push({ pathname: '/Test/book_details', params: { title: now.title, author: now.author } })} style={s.pill} accessibilityRole="button">
+              <Ionicons name="people-outline" size={14} color={colors.text} />
+              <Text style={s.pillText}>Cast</Text>
+            </Pressable>
+          </View>
       </ScrollView>
 
       <Sheet visible={menu} onClose={() => setMenu(false)} title="Listening options">

@@ -24,7 +24,7 @@ export default function Help() {
   };
 
   return (
-    <Screen>
+    <Screen interior="radioroom">
       <PageHeader title="Help & support" fallback="/Test/profile" />
       <ScrollView contentContainerStyle={s.page} showsVerticalScrollIndicator={false}>
         <Text style={s.intro}>Questions from fellow night listeners.</Text>
