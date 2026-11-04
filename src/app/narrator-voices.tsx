@@ -4,8 +4,9 @@ import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect } from 'expo-router';
 import { useAudioPlayer, useAudioPlayerStatus } from 'expo-audio';
 
-import { Screen } from './components/Screen';
-import { GradientButton } from './components/GradientButton';
+import { Screen } from '../components/Screen';
+import { GradientButton } from '../components/GradientButton';
+import { ClientOnly } from '../../lib/ClientOnly';
 import { colors, fonts, type } from '../../theme';
 import { createNarrator, getNarrators, narratorPreviewUri, selectNarrator, type NarratorState, type NarratorVoice } from '../data/narrators';
 
@@ -15,7 +16,11 @@ const PROMPT_IDEAS = [
   { label: 'Bright & lively', description: 'A bright, energetic young adult narrator in their twenties with a clear mid-high pitch, quick pacing, and an expressive, playful delivery.' },
 ];
 
-export default function NarratorVoices() {
+export default function NarratorVoicesRoute() {
+  return <ClientOnly><NarratorVoices /></ClientOnly>;
+}
+
+function NarratorVoices() {
   const player = useAudioPlayer(null);
   const status = useAudioPlayerStatus(player);
   const [state, setState] = useState<NarratorState | null>(null);

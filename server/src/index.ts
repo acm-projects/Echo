@@ -8,7 +8,7 @@ import { createReadStream } from 'node:fs';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import path from 'node:path';
 import process from 'node:process';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { z } from 'zod';
 import Anthropic from '@anthropic-ai/sdk';
 import { zodOutputFormat } from '@anthropic-ai/sdk/helpers/zod';
@@ -887,6 +887,16 @@ app.post('/api/cleanup', async (request, reply) => {
     return reply.code(500).send({ error: 'Cleanup failed' });
   }
 });
+
+// --- Local voice playground (optional dev tool) -------------------------------------------
+// Registers /api/playground/* only when server/playground/routes.ts exists on this machine; that
+// folder is excluded from git, so this block does nothing elsewhere. Safe to delete with the folder.
+const PLAYGROUND_ROUTES = path.join(SERVER_ROOT, 'playground', 'routes.ts');
+if (await access(PLAYGROUND_ROUTES).then(() => true, () => false)) {
+  const { registerPlayground } = await import(pathToFileURL(PLAYGROUND_ROUTES).href);
+  await registerPlayground(app, { postJson, runIndexTts, speakWithVoice, runProcess, sendAudioFile, ensureConfiguration, shapeDialogueEmotion, capNarratorEmotion, dialogueSpeechText, EMOTIONS, FFMPEG });
+}
+// --- End local voice playground -----------------------------------------------------------
 
 app.listen({ port: PORT, host: HOST }).then(() => {
   console.log(`Echo voice server listening at http://127.0.0.1:${PORT}`);

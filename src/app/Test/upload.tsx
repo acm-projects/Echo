@@ -4,7 +4,7 @@ import * as DocumentPicker from 'expo-document-picker';
 import { useCallback, useState } from 'react';
 import { router, useFocusEffect } from 'expo-router';
 
-import { Screen } from '../components/Screen';
+import { Screen } from '../../components/Screen';
 import { colors, fonts, type } from '../../../theme';
 import { getNarrators } from '../../data/narrators';
 import { processBook } from '../../data/bookJobs';

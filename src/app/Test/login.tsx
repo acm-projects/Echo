@@ -5,9 +5,9 @@ import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as WebBrowser from 'expo-web-browser';
 
-import { Screen } from '../components/Screen';
-import { FormField } from '../components/FormField';
-import { GradientButton } from '../components/GradientButton';
+import { Screen } from '../../components/Screen';
+import { FormField } from '../../components/FormField';
+import { GradientButton } from '../../components/GradientButton';
 import { colors, fonts, type } from '../../../theme';
 import { supabase } from '../../../lib/supabase';
 

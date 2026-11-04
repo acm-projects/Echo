@@ -1,13 +1,18 @@
 import { useState } from 'react';
 import { ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useAudioPlayer } from 'expo-audio';
-import { Screen } from '../components/Screen';
-import { GradientButton } from '../components/GradientButton';
+import { Screen } from '../../components/Screen';
+import { GradientButton } from '../../components/GradientButton';
+import { ClientOnly } from '../../../lib/ClientOnly';
 import { colors, fonts, type } from '../../../theme';
 import { notify } from '../../../lib/notify';
 import { VOICE_SERVER_URL as SERVER_URL } from '../../data/voiceServer';
 
-export default function VoiceLab() {
+export default function VoiceLabRoute() {
+  return <ClientOnly><VoiceLab /></ClientOnly>;
+}
+
+function VoiceLab() {
   const player = useAudioPlayer(null);
   const [voiceDescription, setVoiceDescription] = useState('A warm, measured audiobook narrator with a low, clear timbre and gentle contemporary English accent.');
   const [text, setText] = useState('The room beneath the stars was silent, except for the soft turning of a page.');

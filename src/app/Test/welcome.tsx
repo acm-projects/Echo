@@ -1,8 +1,8 @@
 import { Text, View } from 'react-native';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { Screen } from '../components/Screen';
-import { GradientButton } from '../components/GradientButton';
+import { Screen } from '../../components/Screen';
+import { GradientButton } from '../../components/GradientButton';
 import { colors, fonts } from '../../../theme';
 
 export default function Welcome() {

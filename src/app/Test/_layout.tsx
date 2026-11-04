@@ -4,7 +4,7 @@ import type { BottomTabBarProps } from 'expo-router/build/react-navigation/botto
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { MiniPlayer } from '../components/MiniPlayer';
+import { MiniPlayer } from '../../components/MiniPlayer';
 import { colors, fonts, gradients } from '../../../theme';
 
 type Icon = keyof typeof Ionicons.glyphMap;
@@ -16,7 +16,7 @@ const TABS: Record<string, { label: string; icon: Icon }> = {
   profile: { label: 'Profile', icon: 'person-outline' },
 };
 
-function TabBar({ state, navigation }: BottomTabBarProps) {
+function TabBar({ state, navigateToTab }: BottomTabBarProps) {
   const insets = useSafeAreaInsets();
   const active = state.routes[state.index].name;
   if (!TABS[active]) return null;
@@ -31,7 +31,7 @@ function TabBar({ state, navigation }: BottomTabBarProps) {
           const tab = TABS[route.name];
           if (!tab) return null;
           const focused = state.index === i;
-          const onPress = () => navigation.navigate(route.name);
+          const onPress = () => navigateToTab(route.key);
 
           if (route.name === 'player') {
             return (

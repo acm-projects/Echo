@@ -8,7 +8,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
-import { Screen } from '../components/Screen';
+import { Screen } from '../../components/Screen';
 import { colors, fonts, type } from '../../../theme';
 
 type CommunityTab = 'Book Rooms' | 'Following';

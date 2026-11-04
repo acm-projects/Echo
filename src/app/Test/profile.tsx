@@ -1,7 +1,7 @@
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { notify } from '../../../lib/notify';
 import { Ionicons } from '@expo/vector-icons';
-import { Screen } from '../components/Screen';
+import { Screen } from '../../components/Screen';
 import { colors, fonts, type } from '../../../theme';
 import { useRouter } from 'expo-router';
 import { supabase } from '../../../lib/supabase';
