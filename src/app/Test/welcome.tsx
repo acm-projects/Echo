@@ -1,5 +1,7 @@
 
 import React, { useEffect, useRef } from 'react';
+import { Inter_400Regular, Inter_600SemiBold } from '@expo-google-fonts/inter';
+import { useFonts } from 'expo-font';
 import {
   Animated,
   Easing,
@@ -45,7 +47,7 @@ const SPARKLE_STARS = [
   { x: 0.18, y: 0.26, size: 12, delay: 1200 },
   { x: 0.89, y: 0.34, size: 11, delay: 500 },
   { x: 0.12, y: 0.64, size: 10, delay: 1000 },
-  { x: 0.86, y: 0.70, size: 13, delay: 300 },
+  { x: 0.86, y: 0.60, size: 13, delay: 300 },
 ] as const;
 
 type StarProps = {
@@ -286,15 +288,27 @@ function DividerMoon() {
 }
 
 export default function Welcome() {
+  const [fontsLoaded, fontError] = useFonts({
+    MoonveilStellarion: require('../../../assets/fonts/MoonveilStellarion-PersonalUse.ttf'),
+    Inter_600SemiBold,
+    Inter_400Regular,
+  });
   const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
+
+  if (fontError) throw fontError;
+  if (!fontsLoaded) return null;
 
   const compact = height < 720;
 
   const logoSize = Math.min(
-    width * 0.74,
-    compact ? 220 : 280,
-    height * 0.31
+    Math.min(
+      width * 0.74,
+      compact ? 220 : 280,
+      height * 0.31
+    ) * 1.1,
+    width * 0.82,
+    height * 0.34
   );
 
   return (
@@ -341,10 +355,22 @@ export default function Welcome() {
         <Text
           style={[
             styles.title,
-            { fontSize: compact ? 60 : 74 },
+            {
+              fontSize: compact ? 60 : 74,
+              lineHeight: compact ? 74 : 90,
+            },
           ]}
         >
           Echo
+        </Text>
+
+        <Text
+          accessibilityRole="text"
+          adjustsFontSizeToFit
+          numberOfLines={1}
+          style={styles.tagline}
+        >
+          Every story, in every voice.
         </Text>
 
         <DividerMoon />
@@ -360,14 +386,15 @@ export default function Welcome() {
               width * 0.08
             ),
             paddingBottom: Math.max(
-              insets.bottom + 72,
-              compact ? 92 : 126
+              insets.bottom + 56,
+              compact ? 80 : 104
             ),
           },
         ]}
       >
         <Pressable
           accessibilityRole="button"
+          accessibilityHint="Opens the login screen"
           onPress={() => router.push('/Test/login')}
           style={({ pressed }) => [
             styles.button,
@@ -376,12 +403,13 @@ export default function Welcome() {
           ]}
         >
           <Text style={styles.primaryText}>
-            LOG IN
+            Login
           </Text>
         </Pressable>
 
         <Pressable
           accessibilityRole="button"
+          accessibilityHint="Opens the sign up screen"
           onPress={() => router.push('/Test/signup')}
           style={({ pressed }) => [
             styles.button,
@@ -421,10 +449,11 @@ const styles = StyleSheet.create({
   },
 
   title: {
-    fontFamily: fonts.serif,
+    fontFamily: fonts.display,
     color: '#F1A8CF',
     textAlign: 'center',
-    letterSpacing: 3,
+    letterSpacing: 0.5,
+    paddingBottom: 8,
     marginTop: -6,
     textShadowColor: 'rgba(241,168,207,0.42)',
     textShadowOffset: {
@@ -434,17 +463,32 @@ const styles = StyleSheet.create({
     textShadowRadius: 18,
   },
 
+  tagline: {
+    fontFamily: fonts.tagline,
+    fontSize: 17,
+    lineHeight: 24,
+    color: colors.rose,
+    textAlign: 'center',
+    letterSpacing: 0.3,
+    marginTop: 2,
+    opacity: 1,
+    textShadowColor: 'rgba(209,110,139,0.30)',
+    textShadowOffset: { width: 0, height: 0 },
+    textShadowRadius: 8,
+  },
+
   ornament: {
-    marginTop: 10,
+    marginTop: 28,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 13,
   },
 
   line: {
-    width: 54,
+    width: 64,
     height: 1,
-    backgroundColor: 'rgba(245,198,90,0.56)',
+    backgroundColor: colors.gold,
+    opacity: 0.85,
   },
 
   smallMoon: {
@@ -478,22 +522,22 @@ const styles = StyleSheet.create({
   },
 
   secondaryButton: {
-    backgroundColor: 'rgba(214,123,176,0.08)',
+    backgroundColor: 'rgba(23,0,51,0.55)',
     borderWidth: 1.8,
     borderColor: '#E894C5',
   },
 
   primaryText: {
-    fontFamily: fonts.sansBold,
+    fontFamily: fonts.button,
     color: '#29123C',
-    fontSize: 16,
-    letterSpacing: 3,
+    fontSize: 17,
+    letterSpacing: 0.3,
   },
 
   secondaryText: {
-    fontFamily: fonts.sansBold,
+    fontFamily: fonts.button,
     color: '#F1A8CF',
-    fontSize: 16,
+    fontSize: 17,
   },
 
   pressed: {

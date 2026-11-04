@@ -3,18 +3,21 @@ export const colors = {
   text: '#F3E9FF', dim: 'rgba(243,233,255,0.62)', faint: 'rgba(243,233,255,0.38)',
   card: 'rgba(255,255,255,0.06)', border: 'rgba(255,255,255,0.12)',
   pink: '#D67BB0', lilac: '#9B6BD6', gold: '#F5C65A', blue: '#7FA8E6', danger: '#E0667A',
+  rose: '#D16E8B',
 };
 export const gradients = {
   cta: ['#9B5FD0', '#D46AA8'] as const,
   gold: ['#F5C65A', '#D9982E'] as const,
 };
-// Serif for titles, sans for everything else. Use ONLY these so screens stay consistent.
-// Load with @expo-google-fonts/lora and @expo-google-fonts/nunito.
+// Serif for titles, sans for everything else; display is the local welcome wordmark font.
 export const fonts = {
   serif: 'Lora_400Regular',
   sans: 'Nunito_400Regular',
   sansMd: 'Nunito_600SemiBold',
   sansBold: 'Nunito_800ExtraBold',
+  display: 'MoonveilStellarion',
+  button: 'Inter_600SemiBold',
+  tagline: 'Inter_400Regular',
 };
 export const type = {
   h1: { fontFamily: fonts.sansBold, fontSize: 28, color: colors.text },

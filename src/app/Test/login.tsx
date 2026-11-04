@@ -12,6 +12,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
   useWindowDimensions,
 } from 'react-native';
@@ -20,7 +21,6 @@ import { Ionicons } from '@expo/vector-icons';
 import * as WebBrowser from 'expo-web-browser';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { FormField } from '../components/FormField';
 import { colors, fonts } from '../../../theme';
 import { supabase } from '../../../lib/supabase';
 
@@ -36,6 +36,72 @@ const STARS = [
   { x: 0.14, y: 0.68, size: 3 },
   { x: 0.87, y: 0.72, size: 2 },
 ] as const;
+
+const ADDITIONAL_STARS = [
+  { x: 0.27, y: 0.06, size: 2, delay: 150 },
+  { x: 0.24, y: 0.17, size: 3, delay: 450 },
+  { x: 0.75, y: 0.07, size: 2, delay: 750 },
+  { x: 0.91, y: 0.17, size: 3, delay: 1050 },
+  { x: 0.77, y: 0.22, size: 2, delay: 1350 },
+  { x: 0.97, y: 0.23, size: 2, delay: 1650 },
+] as const;
+
+function TwinklingStar({
+  x,
+  y,
+  size,
+  delay,
+  width,
+  height,
+}: {
+  x: number;
+  y: number;
+  size: number;
+  delay: number;
+  width: number;
+  height: number;
+}) {
+  const twinkle = useRef(
+    new Animated.Value(0.18)
+  ).current;
+
+  useEffect(() => {
+    const animation = Animated.loop(
+      Animated.sequence([
+        Animated.delay(delay),
+        Animated.timing(twinkle, {
+          toValue: 0.6,
+          duration: 1600,
+          useNativeDriver: true,
+        }),
+        Animated.timing(twinkle, {
+          toValue: 0.18,
+          duration: 2100,
+          useNativeDriver: true,
+        }),
+      ])
+    );
+
+    animation.start();
+    return () => animation.stop();
+  }, [delay, twinkle]);
+
+  return (
+    <Animated.View
+      pointerEvents="none"
+      style={{
+        position: 'absolute',
+        left: width * x,
+        top: height * y,
+        width: size,
+        height: size,
+        borderRadius: size / 2,
+        backgroundColor: '#F7E2BE',
+        opacity: twinkle,
+      }}
+    />
+  );
+}
 
 function TwinklingStars({
   width,
@@ -67,16 +133,18 @@ function TwinklingStars({
     );
 
     animation.start();
-
     return () => animation.stop();
   }, [twinkle]);
 
   return (
     <View
       pointerEvents="none"
-      style={StyleSheet.absoluteFill}
+      style={[
+        StyleSheet.absoluteFill,
+        styles.stars,
+      ]}
     >
-      {STARS.map((star, index) => (
+      {STARS.filter((star) => star.y <= 0.3).map((star, index) => (
         <Animated.View
           key={index}
           style={{
@@ -91,6 +159,14 @@ function TwinklingStars({
           }}
         />
       ))}
+      {ADDITIONAL_STARS.map((star, index) => (
+        <TwinklingStar
+          key={`additional-${index}`}
+          {...star}
+          width={width}
+          height={height}
+        />
+      ))}
     </View>
   );
 }
@@ -103,6 +179,9 @@ export default function Login() {
   const [password, setPassword] = useState('');
   const [show, setShow] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [emailFocused, setEmailFocused] = useState(false);
+  const [passwordFocused, setPasswordFocused] = useState(false);
+  const [loginError, setLoginError] = useState('');
 
   const logoFloat = useRef(
     new Animated.Value(0)
@@ -155,6 +234,7 @@ export default function Login() {
         });
 
       if (error) {
+        setLoginError(error.message);
         Alert.alert(
           'Login failed',
           error.message
@@ -178,12 +258,7 @@ export default function Login() {
     router.replace('/Test/welcome');
   };
 
-  const logoSize = Math.min(
-    width * 0.38,
-    155
-  );
-
-  const compact = height < 720;
+  const logoSize = Math.min(width * 0.32, 125);
 
   const cloudHeight = Math.min(
     height * 0.28,
@@ -217,7 +292,8 @@ export default function Login() {
       {/* Back button */}
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel="Back to welcome"
+        accessibilityLabel="Go back"
+        hitSlop={12}
         onPress={handleBack}
         style={[
           styles.backButton,
@@ -243,81 +319,108 @@ export default function Login() {
           contentContainerStyle={[
             styles.scrollContent,
             {
-              paddingTop: insets.top + 65,
-              paddingBottom: insets.bottom + 35,
+              paddingTop: insets.top + 16,
+              paddingBottom: insets.bottom + 16,
             },
           ]}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
           <View style={styles.mainContent}>
-            {/* Echo moon and bat logo */}
-            <Animated.View
-              style={{
-                transform: [
-                  { translateY: logoFloat },
-                ],
-              }}
-            >
-              <Image
-                source={require('../../../assets/images/echo-logo.png')}
-                resizeMode="contain"
+            <View style={styles.header}>
+              {/* Echo moon and bat logo */}
+              <Animated.View
                 style={{
-                  width: logoSize,
-                  height: logoSize,
+                  transform: [
+                    { translateY: logoFloat },
+                  ],
                 }}
-              />
-            </Animated.View>
+              >
+                <Image
+                  source={require('../../../assets/images/echo-logo.png')}
+                  resizeMode="contain"
+                  style={{
+                    width: logoSize,
+                    height: logoSize,
+                  }}
+                />
+              </Animated.View>
 
-            <Text style={styles.logoText}>
-              Echo
-            </Text>
-
-            <View style={styles.ornament}>
-              <View style={styles.ornamentLine} />
-
-              <Text style={styles.smallMoon}>
-                ☾
+              <Text style={styles.logoText}>
+                Echo
               </Text>
 
-              <View style={styles.ornamentLine} />
+              <Text style={styles.subtitle}>
+                Your next story is waiting
+              </Text>
             </View>
-
-            <Text
-              style={[
-                styles.welcomeTitle,
-                {
-                  marginTop: compact ? 18 : 25,
-                },
-              ]}
-            >
-              Welcome back
-            </Text>
-
-            <Text style={styles.subtitle}>
-              Your next story is waiting
-            </Text>
 
             {/* Login fields */}
             <View style={styles.form}>
-              <FormField
-                label="EMAIL"
-                icon="mail-outline"
-                placeholder="your email"
-                value={email}
-                onChangeText={setEmail}
-                keyboardType="email-address"
-                autoCapitalize="none"
-              />
+              <View style={styles.field}>
+                <Text style={styles.fieldLabel}>Email</Text>
+                <View
+                  style={[
+                    styles.inputBox,
+                    emailFocused && styles.inputFocused,
+                  ]}
+                >
+                  <Ionicons
+                    name="mail-outline"
+                    size={20}
+                    color="#C5ACDD"
+                  />
+                  <TextInput
+                    placeholder="name@example.com"
+                    placeholderTextColor={colors.dim}
+                    value={email}
+                    onChangeText={(value) => {
+                      setEmail(value);
+                      setLoginError('');
+                    }}
+                    onFocus={() => setEmailFocused(true)}
+                    onBlur={() => setEmailFocused(false)}
+                    keyboardType="email-address"
+                    autoCapitalize="none"
+                    autoComplete="email"
+                    textContentType="emailAddress"
+                    returnKeyType="next"
+                    style={styles.input}
+                  />
+                </View>
+              </View>
 
-              <FormField
-                label="PASSWORD"
-                icon="lock-closed-outline"
-                placeholder="password"
-                value={password}
-                onChangeText={setPassword}
-                secureTextEntry={!show}
-                right={
+              <View style={styles.field}>
+                <Text style={styles.fieldLabel}>Password</Text>
+                <View
+                  style={[
+                    styles.inputBox,
+                    passwordFocused && styles.inputFocused,
+                  ]}
+                >
+                  <Ionicons
+                    name="lock-closed-outline"
+                    size={20}
+                    color="#C5ACDD"
+                  />
+                  <TextInput
+                    placeholder="Enter your password"
+                    placeholderTextColor={colors.dim}
+                    value={password}
+                    onChangeText={(value) => {
+                      setPassword(value);
+                      setLoginError('');
+                    }}
+                    onFocus={() => setPasswordFocused(true)}
+                    onBlur={() => setPasswordFocused(false)}
+                    secureTextEntry={!show}
+                    autoCapitalize="none"
+                    autoComplete="current-password"
+                    textContentType="password"
+                    returnKeyType="done"
+                    onSubmitEditing={handleLogin}
+                    style={styles.input}
+                  />
                   <Pressable
                     onPress={() =>
                       setShow((current) => !current)
@@ -328,7 +431,7 @@ export default function Login() {
                         ? 'Hide password'
                         : 'Show password'
                     }
-                    hitSlop={10}
+                    hitSlop={12}
                   >
                     <Ionicons
                       name={
@@ -340,12 +443,20 @@ export default function Login() {
                       color="#BDA5D3"
                     />
                   </Pressable>
-                }
-              />
+                </View>
+              </View>
 
-              {/* Password recovery left unchanged */}
+              {loginError ? (
+                <Text style={styles.loginError}>
+                  {loginError === 'Invalid login credentials'
+                    ? "That email and password don't match. Try again?"
+                    : loginError}
+                </Text>
+              ) : null}
+
               <Pressable
                 style={styles.forgotPassword}
+                hitSlop={12}
                 accessibilityRole="button"
                 onPress={() =>
                   Alert.alert(
@@ -366,8 +477,8 @@ export default function Login() {
                 accessibilityRole="button"
                 style={({ pressed }) => [
                   styles.signInButton,
-                  (pressed || loading) &&
-                    styles.pressed,
+                  pressed && styles.pressed,
+                  loading && styles.loading,
                 ]}
               >
                 {loading ? (
@@ -376,7 +487,7 @@ export default function Login() {
                   />
                 ) : (
                   <Text style={styles.signInText}>
-                    SIGN IN
+                    Login
                   </Text>
                 )}
               </Pressable>
@@ -401,7 +512,7 @@ export default function Login() {
                 ]}
               >
                 <Text style={styles.signUpText}>
-                  New here? Create account
+                  Create account
                 </Text>
               </Pressable>
             </View>
@@ -424,6 +535,10 @@ const styles = StyleSheet.create({
     zIndex: 2,
   },
 
+  stars: {
+    zIndex: 0,
+  },
+
   scrollContent: {
     flexGrow: 1,
     paddingHorizontal: 28,
@@ -434,6 +549,12 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     width: '100%',
+  },
+
+  header: {
+    alignItems: 'center',
+    width: '100%',
+    marginBottom: 28,
   },
 
   cloudContainer: {
@@ -460,53 +581,29 @@ const styles = StyleSheet.create({
   },
 
   logoText: {
-    fontFamily: fonts.serif,
+    fontFamily: fonts.display,
     fontSize: 46,
     color: '#F1A8CF',
-    letterSpacing: 3,
-    marginTop: -5,
-    textShadowColor:
-      'rgba(241,168,207,0.4)',
+    lineHeight: 58,
+    letterSpacing: 0.5,
+    paddingBottom: 8,
+    marginTop: -6,
+    textShadowColor: 'rgba(241,168,207,0.42)',
     textShadowOffset: {
       width: 0,
       height: 0,
     },
-    textShadowRadius: 15,
-  },
-
-  ornament: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    marginTop: 7,
-  },
-
-  ornamentLine: {
-    width: 32,
-    height: 1,
-    backgroundColor:
-      'rgba(245,198,90,0.5)',
-  },
-
-  smallMoon: {
-    fontSize: 15,
-    color: colors.gold,
-  },
-
-  welcomeTitle: {
-    fontFamily: fonts.serif,
-    fontSize: 30,
-    color: '#F3D8F1',
-    textAlign: 'center',
+    textShadowRadius: 18,
   },
 
   subtitle: {
-    fontFamily: fonts.sans,
-    fontSize: 14,
-    color: '#CBB6E0',
+    fontFamily: fonts.tagline,
+    fontSize: 17,
+    lineHeight: 24,
+    color: colors.dim,
     textAlign: 'center',
-    marginTop: 8,
-    marginBottom: 25,
+    marginTop: 4,
+    letterSpacing: 0.2,
   },
 
   form: {
@@ -514,17 +611,70 @@ const styles = StyleSheet.create({
     maxWidth: 420,
   },
 
+  field: {
+    marginBottom: 20,
+  },
+
+  fieldLabel: {
+    fontFamily: fonts.button,
+    fontSize: 14,
+    color: colors.text,
+    marginBottom: 8,
+  },
+
+  inputBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    minHeight: 56,
+    paddingHorizontal: 16,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.085)',
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+
+  inputFocused: {
+    borderColor: colors.pink,
+    shadowColor: colors.pink,
+    shadowOpacity: 0.35,
+    shadowRadius: 10,
+    shadowOffset: {
+      width: 0,
+      height: 0,
+    },
+    elevation: 3,
+  },
+
+  input: {
+    flex: 1,
+    minHeight: 56,
+    color: colors.text,
+    fontFamily: fonts.tagline,
+    fontSize: 16,
+  },
+
+  loginError: {
+    fontFamily: fonts.tagline,
+    fontSize: 14,
+    color: colors.danger,
+    marginTop: -4,
+    marginBottom: 8,
+  },
+
   forgotPassword: {
     alignSelf: 'flex-end',
-    marginTop: 0,
-    marginBottom: 15,
-    paddingVertical: 5,
+    marginTop: -6,
+    marginBottom: 20,
+    minHeight: 44,
+    justifyContent: 'center',
+    paddingHorizontal: 4,
   },
 
   forgotText: {
-    fontFamily: fonts.sansMd,
-    color: '#E7A2CD',
-    fontSize: 13,
+    fontFamily: fonts.button,
+    color: colors.rose,
+    fontSize: 14,
   },
 
   signInButton: {
@@ -546,9 +696,9 @@ const styles = StyleSheet.create({
   },
 
   signInText: {
-    fontFamily: fonts.sansBold,
-    fontSize: 15,
-    letterSpacing: 2,
+    fontFamily: fonts.button,
+    fontSize: 17,
+    letterSpacing: 0.3,
     color: '#29123C',
   },
 
@@ -556,17 +706,17 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
-    marginVertical: 20,
+    marginVertical: 18,
   },
 
   dividerLine: {
     flex: 1,
     height: 1,
-    backgroundColor: colors.border,
+    backgroundColor: 'rgba(243,233,255,0.22)',
   },
 
   dividerText: {
-    fontFamily: fonts.sansMd,
+    fontFamily: fonts.tagline,
     fontSize: 13,
     color: '#CBB6E0',
   },
@@ -576,19 +726,23 @@ const styles = StyleSheet.create({
     borderRadius: 30,
     borderWidth: 1.5,
     borderColor: '#E894C5',
-    backgroundColor:
-      'rgba(55,24,83,0.85)',
+    backgroundColor: 'rgba(23,0,51,0.55)',
     alignItems: 'center',
     justifyContent: 'center',
   },
 
   signUpText: {
-    fontFamily: fonts.sansBold,
-    fontSize: 14,
+    fontFamily: fonts.button,
+    fontSize: 17,
     color: '#F1A8CF',
   },
 
   pressed: {
+    opacity: 0.82,
+    transform: [{ scale: 0.985 }],
+  },
+
+  loading: {
     opacity: 0.78,
   },
 });
