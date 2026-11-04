@@ -12,9 +12,9 @@ import {
   TextInput,
   TouchableOpacity,
   View,
-  Alert,
   ScrollView,
 } from 'react-native';
+import { notify } from '../../lib/notify';
 
 
 WebBrowser.maybeCompleteAuthSession();
@@ -22,7 +22,7 @@ WebBrowser.maybeCompleteAuthSession();
 export default function LoginScreen() {
   const handleLogin =  async () => {
     const { error } = await supabase.auth.signInWithPassword({ email, password })
-    if (error) {Alert.alert('Login failed', error.message)
+    if (error) {notify('Login failed', error.message)
     } else {
       router.replace('/home');
     }

@@ -8,7 +8,7 @@ import {
 import { router, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 
-import { Screen } from '../components/Screen';
+import { Screen } from '../../components/Screen';
 import { fonts } from '../../../theme';
 
 const characters = [

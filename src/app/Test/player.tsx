@@ -1,8 +1,8 @@
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import { Screen } from '../components/Screen';
-import { ProgressBar } from '../components/ProgressBar';
+import { Screen } from '../../components/Screen';
+import { ProgressBar } from '../../components/ProgressBar';
 import { colors, fonts, gradients, type } from '../../../theme';
 
 export default function Player() {

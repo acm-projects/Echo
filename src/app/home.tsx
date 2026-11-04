@@ -1,7 +1,7 @@
 import { View, Text, StyleSheet } from 'react-native';
 import { supabase } from '../../lib/supabase';
 import { useEffect, useState } from 'react';
-import { BookCard } from './components/BookCard';
+import { BookCard } from '../components/BookCard';
 
 export default function HomeScreen() {
     const [username, setUsername] = useState<string | null>(null);
