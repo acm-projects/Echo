@@ -11,7 +11,22 @@ export type Settings = {
   dailyReminder: boolean;
   friendActivity: boolean;
   newChapters: boolean;
+  // Each kind of animation can be switched off on its own (Reduce Motion in the OS turns them all off).
+  motionNavigation: boolean;
+  motionOpening: boolean;
+  motionRooms: boolean;
+  motionBackground: boolean;
+  motionDetails: boolean;
 };
+
+export type MotionKind = 'navigation' | 'opening' | 'rooms' | 'background' | 'details';
+export const MOTION_KEYS = {
+  navigation: 'motionNavigation',
+  opening: 'motionOpening',
+  rooms: 'motionRooms',
+  background: 'motionBackground',
+  details: 'motionDetails',
+} as const satisfies Record<MotionKind, keyof Settings>;
 
 export const DEFAULT_SETTINGS: Settings = {
   playbackSpeed: 1,
@@ -22,6 +37,11 @@ export const DEFAULT_SETTINGS: Settings = {
   dailyReminder: true,
   friendActivity: true,
   newChapters: false,
+  motionNavigation: true,
+  motionOpening: true,
+  motionRooms: true,
+  motionBackground: true,
+  motionDetails: true,
 };
 
 const KEY = 'echo.settings.v1';
@@ -37,6 +57,11 @@ async function load(): Promise<Settings> {
     cache = { ...DEFAULT_SETTINGS };
   }
   return cache!;
+}
+
+/** The settings as last loaded, for code outside React (navigation decides on the spot). */
+export function currentSettings(): Settings {
+  return cache ?? DEFAULT_SETTINGS;
 }
 
 /** Shared settings: every screen using this hook sees updates immediately. */

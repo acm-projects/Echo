@@ -9,7 +9,7 @@ import { Reveal } from '../../../components/Reveal';
 import { Jacket } from '../../../components/Jacket';
 import { DoodleUnderline } from '../../../components/Doodle';
 import { colors, fonts, radius, scenes } from '../../../../theme';
-import { FRIENDS_READING, GENRES, RECOMMENDED, booksInGenre, genreOf, type DiscoverBook, type GenreId } from '../../../data/discover';
+import { GENRES, RECOMMENDED, booksInGenre, genreOf, type DiscoverBook, type GenreId } from '../../../data/discover';
 
 const accent = scenes.dusk.accent;
 
@@ -110,32 +110,6 @@ export default function LibraryScreen() {
           </ScrollView>
         </Reveal>
 
-        <Reveal index={3}>
-          <SectionHead title="Your Friends Are Reading" subtitle="Sample activity · live friend activity coming later" />
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.rail}>
-            {FRIENDS_READING.map((f) => (
-              <Pressable key={f.name} style={s.friend} onPress={() => openBook(f.book)} accessibilityRole="button">
-                <View style={s.friendHead}>
-                  <View style={[s.avatar, { backgroundColor: `${f.color}33` }]}><Text style={[s.avatarText, { color: f.color }]}>{f.initial}</Text></View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={s.friendName}>{f.name}</Text>
-                    <Text style={s.sample}>Sample reader</Text>
-                  </View>
-                  <Ionicons name="headset-outline" size={16} color={colors.dim} />
-                </View>
-                <View style={{ flexDirection: 'row', gap: 12 }}>
-                  <Jacket title={f.book.title} author={f.book.author} accent={f.book.accent} width={62} />
-                  <View style={{ flex: 1, justifyContent: 'center', gap: 3 }}>
-                    <Text style={s.smallTitle} numberOfLines={2}>{f.book.title}</Text>
-                    <Text style={s.bookAuthor}>{f.book.author}</Text>
-                    <Text style={s.reading}>READING NOW · DEMO</Text>
-                  </View>
-                </View>
-              </Pressable>
-            ))}
-          </ScrollView>
-        </Reveal>
-
         <View style={s.footer}>
           <Ionicons name="moon-outline" size={14} color={colors.faint} />
           <Text style={s.footerText}>Every good story starts somewhere.</Text>
@@ -170,13 +144,6 @@ const s = StyleSheet.create({
   genreIcon: { width: 34, height: 34, borderRadius: radius.sm, alignItems: 'center', justifyContent: 'center' },
   shelfBook: { width: 104, gap: 8 },
   smallTitle: { fontFamily: fonts.serif, fontSize: 14, lineHeight: 18, color: '#FFFFFF' },
-  friend: { width: 250, gap: 12, padding: 14, borderRadius: radius.lg, backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border },
-  friendHead: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  avatar: { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
-  avatarText: { fontFamily: fonts.sansBold, fontSize: 14 },
-  friendName: { fontFamily: fonts.sansBold, fontSize: 14, color: '#FFFFFF' },
-  sample: { fontFamily: fonts.sans, fontSize: 11, color: colors.faint },
-  reading: { fontFamily: fonts.sansBold, fontSize: 9, letterSpacing: 1.5, color: accent, marginTop: 4 },
   footer: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, marginTop: 8 },
   footerText: { fontFamily: fonts.serifItalic, fontSize: 13, color: colors.faint },
 });

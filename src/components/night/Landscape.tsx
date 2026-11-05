@@ -4,6 +4,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import Svg, { Path, Rect } from 'react-native-svg';
 import { night, type Scene } from '../../../theme';
 import { FlyingBat } from './Bat';
+import { LoadingDots } from '../LoadingDots';
 
 // The open country between cities, shown while the next screen is still loading during a transition: the bat flies
 // on over a pine forest or a country road until there's somewhere to land.
@@ -115,6 +116,9 @@ export function Landscape({ kind, scene, dir }: { kind: LandscapeKind; scene: Sc
       <Animated.View style={{ position: 'absolute', left: width / 2 - 55, top: height * 0.34, transform: [{ translateY: bob.interpolate({ inputRange: [0, 1], outputRange: [-8, 8] }) }, { rotate: `${dir * 8}deg` }] }}>
         <FlyingBat size={110} flapMs={150} />
       </Animated.View>
+      <View style={{ position: 'absolute', left: 0, right: 0, top: height * 0.34 + 110 }}>
+        <LoadingDots color={night.window} />
+      </View>
     </View>
   );
 }

@@ -159,7 +159,7 @@ export default function Player() {
         </View>
         <SheetItem icon="moon-outline" label="Sleep timer" detail={settings.sleepTimerMinutes ? `${settings.sleepTimerMinutes} min` : 'Off'} onPress={() => update('sleepTimerMinutes', ({ 0: 15, 15: 30, 30: 45, 45: 60, 60: 0 } as const)[settings.sleepTimerMinutes])} />
         <SheetItem icon="book-outline" label="Book details & cast" onPress={() => { setMenu(false); router.push({ pathname: '/Test/book_details', params: { title: now.title, author: now.author } }); }} />
-        <SheetItem icon="pulse-outline" label="Voice settings" onPress={() => { setMenu(false); router.push({ pathname: '/Test/settings', params: { section: 'voice' } }); }} />
+        <SheetItem icon="options-outline" label="Playback settings" detail="Speed, skip, autoplay" onPress={() => { setMenu(false); router.push('/Test/playback-settings'); }} />
       </Sheet>
     </Screen>
   );

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef } from 'react';
 import { Animated, Easing } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
-import { useReducedMotion } from './night/NightSky';
+import { useMotion } from './night/NightSky';
 
 /**
  * A pen-drawn underline that sketches itself in once, left to right. `seed` (usually the heading text) gives each
@@ -10,7 +10,7 @@ import { useReducedMotion } from './night/NightSky';
  * Animated's props onto the DOM <path>.
  */
 export function DoodleUnderline({ width, color, seed = '', delay = 250 }: { width: number; color: string; seed?: string; delay?: number }) {
-  const reduced = useReducedMotion();
+  const reduced = !useMotion('details');
   const draw = useRef(new Animated.Value(reduced ? 1 : 0)).current;
 
   const d = useMemo(() => {
@@ -23,7 +23,7 @@ export function DoodleUnderline({ width, color, seed = '', delay = 250 }: { widt
   }, [seed, width]);
 
   useEffect(() => {
-    if (reduced) return;
+    if (reduced) return draw.setValue(1);
     Animated.timing(draw, { toValue: 1, duration: 700, delay, easing: Easing.out(Easing.cubic), useNativeDriver: false }).start();
   }, [delay, draw, reduced]);
 

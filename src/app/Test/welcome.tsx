@@ -10,11 +10,12 @@ import {
   View,
   useWindowDimensions,
 } from 'react-native';
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, fonts } from '../../../theme';
 import { BatSwoop } from '../../components/night/BatSwoop';
-import { useReducedMotion } from '../../components/night/NightSky';
+import { useMotion } from '../../components/night/NightSky';
+import { isTraveling, markScreenReady, recordMoon } from '../../components/night/perchRegistry';
 
 // The swoop is an arrival moment, so it plays once per app launch rather than every visit to welcome.
 let swoopPlayed = false;
@@ -300,14 +301,15 @@ export default function Welcome() {
     height * 0.31
   );
 
-  const reduced = useReducedMotion();
+  const reduced = !useMotion('opening');
   const swoop = useRef(new Animated.Value(swoopPlayed ? 1 : 0)).current;
   const [landing, setLanding] = useState<{ x: number; y: number } | null>(null);
   const [swooping, setSwooping] = useState(!swoopPlayed);
 
   useEffect(() => {
     if (!landing || !swooping) return;
-    if (reduced) {
+    // Arriving by a trip (signing out), the trip has already flown the bat home onto the moon.
+    if (reduced || isTraveling()) {
       swoop.setValue(1);
       setSwooping(false);
       return;
@@ -317,6 +319,9 @@ export default function Welcome() {
     run.start(() => setSwooping(false));
     return () => run.stop();
   }, [landing, reduced, swoop, swooping]);
+
+  // Lets a sign-out trip know the screen is up, so it can land the bat here.
+  useFocusEffect(markScreenReady);
 
   const skip = () => {
     if (!swooping) return;
@@ -381,6 +386,7 @@ export default function Welcome() {
             const { x, y, width: w, height: h } = e.nativeEvent.layout;
             // Land on the bat in the logo, which hangs right of centre under the moon's tip.
             if (!landing) setLanding({ x: x + w * 0.6, y: y + h * 0.42 });
+            recordMoon({ x, y, width: w, height: h, hero: false });
           }}
           style={{ opacity: logoIn, transform: [{ scale: logoCatch }] }}
         >

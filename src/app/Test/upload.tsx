@@ -1,4 +1,4 @@
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as DocumentPicker from 'expo-document-picker';
 import { useCallback, useState } from 'react';
@@ -12,6 +12,7 @@ import { notify } from '../../../lib/notify';
 import { Sheet } from '../../components/Sheet';
 import { ClassicSheet } from '../../components/ClassicSheet';
 import { CLASSICS, useSavedClassics, type Classic } from '../../data/catalog';
+import { useSettings } from '../../data/settings';
 
 // The first few classics; See All opens the full catalog.
 const PUBLIC_DOMAIN_BOOKS = CLASSICS.slice(0, 4);
@@ -24,6 +25,7 @@ export default function Upload() {
   const [helpOpen, setHelpOpen] = useState(false);
   const [openBook, setOpenBook] = useState<Classic | null>(null);
   const [saved, toggleSaved] = useSavedClassics();
+  const [settings, update] = useSettings();
 
   useFocusEffect(useCallback(() => {
     getNarrators()
@@ -112,6 +114,25 @@ export default function Upload() {
           </View>
           <Ionicons name="chevron-forward" size={20} color={colors.faint} />
         </Pressable>
+
+        <View style={s.narratorCard}>
+          <View style={s.narratorIcon}>
+            <Ionicons name="pulse-outline" size={22} color={colors.pink} />
+          </View>
+          <View style={s.narratorInfo}>
+            <Text style={s.narratorTitle}>Character Voices</Text>
+            <Text style={s.narratorSubtitle} numberOfLines={2}>
+              {settings.characterVoices ? 'A different voice for each character' : 'The whole book in your narrator\u2019s voice'}
+            </Text>
+          </View>
+          <Switch
+            value={settings.characterVoices}
+            onValueChange={(v) => update('characterVoices', v)}
+            trackColor={{ false: 'rgba(255,255,255,0.15)', true: colors.pink }}
+            thumbColor="#fff"
+            accessibilityLabel="A different voice for each character"
+          />
+        </View>
 
         <View style={s.sectionHeader}>
           <View>

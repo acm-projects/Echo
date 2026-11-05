@@ -69,6 +69,16 @@ export function screenReadySince(time: number) {
   return readyAt >= time;
 }
 
+// The welcome screen's moon-and-bat logo, in window coordinates, so signing out can fly the bat home onto it.
+let moonAt: Frame | null = null;
+export function recordMoon(frame: Frame) {
+  moonAt = frame;
+  notify();
+}
+export function moonFrame() {
+  return moonAt;
+}
+
 export function onPerchesChange(listener: () => void) {
   listeners.add(listener);
   return () => {
