@@ -17,15 +17,17 @@ export type Settings = {
   motionRooms: boolean;
   motionBackground: boolean;
   motionDetails: boolean;
+  motionLoader: boolean;
 };
 
-export type MotionKind = 'navigation' | 'opening' | 'rooms' | 'background' | 'details';
+export type MotionKind = 'navigation' | 'opening' | 'rooms' | 'background' | 'details' | 'loader';
 export const MOTION_KEYS = {
   navigation: 'motionNavigation',
   opening: 'motionOpening',
   rooms: 'motionRooms',
   background: 'motionBackground',
   details: 'motionDetails',
+  loader: 'motionLoader',
 } as const satisfies Record<MotionKind, keyof Settings>;
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -42,6 +44,7 @@ export const DEFAULT_SETTINGS: Settings = {
   motionRooms: true,
   motionBackground: true,
   motionDetails: true,
+  motionLoader: true,
 };
 
 const KEY = 'echo.settings.v1';

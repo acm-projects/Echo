@@ -13,6 +13,7 @@ import { interiorForPath, sceneForPath } from './sceneStore';
 import { INTERIOR_COLORS, type InteriorKind } from './Interiors';
 import { landmarkDoor } from './Landmarks';
 import { Landscape, type LandscapeKind } from './Landscape';
+import { LoadingDots } from '../LoadingDots';
 
 // `takeoff` is where the roaming bat was the instant the trip began, captured once so it can't drift mid-flight.
 type Trip =
@@ -39,7 +40,10 @@ let startSwipe: ((dest: string, go: () => void) => boolean) | null = null;
 // What a navigation to `dest` would play, from where we are now (null: no trip, just the goodbye fade).
 let tripTo: ((dest: string) => Trip['mode'] | null) | null = null;
 export function depart(go: () => void, dest?: string) {
-  if (leaving || (dest && QUIET_ROUTES.has(dest)) || QUIET_ROUTES.has(visited[visited.length - 1] ?? '')) return go();
+  // One trip at a time: while the bat is flying (or the screen is saying goodbye), further taps are ignored, so you
+  // can switch again only once it has landed. With the animations switched off nothing plays, so nothing waits.
+  if (leaving || tripRunning) return;
+  if ((dest && QUIET_ROUTES.has(dest)) || QUIET_ROUTES.has(visited[visited.length - 1] ?? '')) return go();
   const kind = dest && tripTo ? tripTo(dest) : null;
   // Switched off in Settings: go straight there. Plain page changes count as navigation.
   if (!allowed(kind ? MOTION_FOR[kind] : 'navigation')) return go();
@@ -514,7 +518,7 @@ function ArriveTrip({ p, trip, width, height }: { p: Animated.Value; trip: Extra
 
 /**
  * Signing out: sign-in played backwards in spirit, though the bat flies forwards the whole way.
- *   0.00–0.08  the city eases back in with the bat on its perch.
+ *   0.00–0.08  a full city eases in along the foot of the screen, the bat on its perch.
  *   0.06–0.34  it lifts off and rises toward us as the camera climbs and the city sinks away (0.14–0.44).
  *   0.20–0.50  the sky turns to the sign-in night, and banks of cloud drift in beneath us from both sides (0.24–0.50)...
  *   0.50–0.74  ...then the higher ones sink away, leaving the welcome screen's cloud frame.
@@ -523,8 +527,10 @@ function ArriveTrip({ p, trip, width, height }: { p: Animated.Value; trip: Extra
  */
 function LeaveTrip({ p, trip, width, height }: { p: Animated.Value; trip: Extract<Trip, { mode: 'leave' }>; width: number; height: number }) {
   const from = scenes[trip.from];
-  const frame = cityFrame(trip.from, width, height);
-  const perch = takeoffSpot(trip, trip.from, frame);
+  // As with building trips, the screen's own city is mostly behind the tab bar, so the trip draws a full layered one
+  // along the foot of the screen for the bat to rise out of.
+  const frame = { ...defaultFrame(width, height), hero: true };
+  const perch = computedPerch(trip.from, frame);
   const r = lerp(p);
 
   // The welcome logo, once that screen has laid it out; until then, where it usually sits.
@@ -598,7 +604,8 @@ export function BatTransition() {
   const history = useRef<string[]>([]);
   const trips = useRef(0);
   const [trip, setTrip] = useState<Trip | null>(null);
-  const [waiting, setWaiting] = useState<LandscapeKind | null>(null);
+  // While the next screen loads mid-trip: the bat over open country, or (loading bat switched off) just the words.
+  const [waiting, setWaiting] = useState<LandscapeKind | 'plain' | null>(null);
   const waitFade = useRef(new Animated.Value(0)).current;
   // The destination screen records its city and perch a moment after it mounts; redraw when it does.
   const [, setTick] = useState(0);
@@ -642,7 +649,7 @@ export function BatTransition() {
     const checkpoint = () => {
       if (screenReadySince(startedAt)) return secondHalf();
       // Not ready yet: fly on over open country until it is (or until we've waited long enough).
-      setWaiting(trips.current % 2 ? 'forest' : 'road');
+      setWaiting(!allowed('loader') ? 'plain' : trips.current % 2 ? 'forest' : 'road');
       Animated.timing(waitFade, { toValue: 1, duration: 260, useNativeDriver: true }).start();
       const resume = () => {
         unsubscribe?.();
@@ -741,7 +748,13 @@ export function BatTransition() {
       {(trip.mode === 'enter' || trip.mode === 'exit') && <DoorTrip p={p} trip={trip} width={width} height={height} />}
       {waiting && (
         <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, { opacity: waitFade }]}>
-          <Landscape kind={waiting} scene={scenes[trip.mode === 'swipe' || trip.mode === 'arrive' ? trip.to : trip.mode === 'leave' ? trip.from : trip.city]} dir={trip.dir} />
+          {waiting === 'plain' ? (
+            <View style={[StyleSheet.absoluteFill, { alignItems: 'center', justifyContent: 'center' }]}>
+              <LoadingDots color={night.window} />
+            </View>
+          ) : (
+            <Landscape kind={waiting} scene={scenes[trip.mode === 'swipe' || trip.mode === 'arrive' ? trip.to : trip.mode === 'leave' ? trip.from : trip.city]} dir={trip.dir} />
+          )}
         </Animated.View>
       )}
     </>
