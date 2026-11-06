@@ -1,4 +1,48 @@
 import type { DbClient } from './types'
+import type { Database } from '../database.types'
+
+type CharacterRow = Database['public']['Tables']['characters']['Row']
+type CharacterVoiceChanges = Pick<
+	CharacterRow,
+	'voice_description' | 'voice_settings' | 'voice_sample_path'
+>
+type VoiceJobRow = Database['public']['Tables']['voice_jobs']['Row']
+type CharacterVoiceResult = {
+	character: Pick<
+		CharacterRow,
+		'id' | 'book_id' | 'voice_description' | 'voice_settings' | 'voice_sample_path'
+	>
+	job: VoiceJobRow | null
+	alreadyQueued: boolean
+}
+
+export async function updateCharacterVoice(
+	supabase: DbClient,
+	characterId: string,
+	voiceChanges: CharacterVoiceChanges,
+): Promise<CharacterVoiceResult> {
+	const { data: character, error: characterError } = await supabase
+		.from('characters')
+		.update(voiceChanges)
+		.eq('id', characterId)
+		.select('id, book_id, voice_description, voice_settings, voice_sample_path')
+		.single()
+
+	if (characterError) throw characterError
+
+	const { data: job, error: jobError } = await supabase
+		.from('voice_jobs')
+		.insert({ book_id: character.book_id, character_id: character.id })
+		.select()
+		.single()
+
+	if (jobError?.code === '23505') {
+		return { character, job: null, alreadyQueued: true }
+	}
+	if (jobError) throw jobError
+
+	return { character, job, alreadyQueued: false }
+}
 
 // Spoiler rule used throughout this file:
 // a null gate means "visible from the start"; otherwise it unlocks at that chapter.
