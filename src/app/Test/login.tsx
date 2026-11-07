@@ -289,9 +289,9 @@ export default function Login() {
             <View style={styles.form}>
               <View style={styles.fields}>
                 <FormField
-                  label="EMAIL"
+                  label="Email"
                   icon="mail-outline"
-                  placeholder="your email"
+                  placeholder="name@example.com"
                   value={email}
                   onChangeText={setEmail}
                   keyboardType="email-address"
@@ -299,9 +299,9 @@ export default function Login() {
                 />
 
                 <FormField
-                  label="PASSWORD"
+                  label="Password"
                   icon="lock-closed-outline"
-                  placeholder="password"
+                  placeholder="Enter your password"
                   value={password}
                   onChangeText={setPassword}
                   secureTextEntry={!show}
