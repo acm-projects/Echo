@@ -1,7 +1,5 @@
 
-import React, { useEffect, useRef } from 'react';
-import { Inter_400Regular, Inter_600SemiBold } from '@expo-google-fonts/inter';
-import { useFonts } from 'expo-font';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   Animated,
   Easing,
@@ -15,6 +13,11 @@ import {
 import { router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, fonts } from '../../../theme';
+import { BatSwoop } from '../../components/night/BatSwoop';
+import { useReducedMotion } from '../../components/night/NightSky';
+
+// The swoop is an arrival moment, so it plays once per app launch rather than every visit to welcome.
+let swoopPlayed = false;
 
 // Keep our existing star arrangement
 const DOT_STARS = [
@@ -161,8 +164,6 @@ function SparkleStar({
         fontSize: size,
         opacity,
         transform: [{ scale }],
-        textShadowColor: 'rgba(249,222,162,0.35)',
-        textShadowRadius: 8,
       }}
     >
       ✦
@@ -288,16 +289,8 @@ function DividerMoon() {
 }
 
 export default function Welcome() {
-  const [fontsLoaded, fontError] = useFonts({
-    MoonveilStellarion: require('../../../assets/fonts/MoonveilStellarion-PersonalUse.ttf'),
-    Inter_600SemiBold,
-    Inter_400Regular,
-  });
   const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
-
-  if (fontError) throw fontError;
-  if (!fontsLoaded) return null;
 
   const compact = height < 720;
 
@@ -311,8 +304,40 @@ export default function Welcome() {
     height * 0.34
   );
 
+  const reduced = useReducedMotion();
+  const swoop = useRef(new Animated.Value(swoopPlayed ? 1 : 0)).current;
+  const [landing, setLanding] = useState<{ x: number; y: number } | null>(null);
+  const [swooping, setSwooping] = useState(!swoopPlayed);
+
+  useEffect(() => {
+    if (!landing || !swooping) return;
+    if (reduced) {
+      swoop.setValue(1);
+      setSwooping(false);
+      return;
+    }
+    swoopPlayed = true;
+    const run = Animated.timing(swoop, { toValue: 1, duration: 2900, easing: Easing.inOut(Easing.cubic), useNativeDriver: true });
+    run.start(() => setSwooping(false));
+    return () => run.stop();
+  }, [landing, reduced, swoop, swooping]);
+
+  const skip = () => {
+    if (!swooping) return;
+    swoop.stopAnimation();
+    swoop.setValue(1);
+    setSwooping(false);
+  };
+
+  // The real logo takes over as the drawn bat settles onto the moon; then the title and buttons follow.
+  const logoIn = swoop.interpolate({ inputRange: [0, 0.84, 0.97, 1], outputRange: [0, 0, 1, 1] });
+  const logoCatch = swoop.interpolate({ inputRange: [0, 0.84, 1], outputRange: [0.9, 0.9, 1] });
+  const titleIn = swoop.interpolate({ inputRange: [0, 0.9, 1], outputRange: [0, 0, 1] });
+  const actionsIn = swoop.interpolate({ inputRange: [0, 0.93, 1], outputRange: [0, 0, 1] });
+  const actionsRise = swoop.interpolate({ inputRange: [0, 0.93, 1], outputRange: [24, 24, 0] });
+
   return (
-    <View style={styles.screen}>
+    <View style={styles.screen} onTouchStart={skip}>
       {/* Twinkling stars */}
       <View
         pointerEvents="none"
@@ -337,6 +362,11 @@ export default function Welcome() {
         ))}
       </View>
 
+      {/* The mascot flies in beneath the cloud layer, so it disappears into the clouds at the bottom of its dive */}
+      {swooping && landing && (
+        <BatSwoop progress={swoop} width={width} height={height} land={landing} />
+      )}
+
       {/* New illustrated cloud frame */}
       <CloudFrame width={width} height={height} />
 
@@ -350,36 +380,48 @@ export default function Welcome() {
           },
         ]}
       >
-        <MoonBatLogo size={logoSize} />
-
-        <Text
-          style={[
-            styles.title,
-            {
-              fontSize: compact ? 60 : 74,
-              lineHeight: compact ? 74 : 90,
-            },
-          ]}
+        <Animated.View
+          onLayout={(e) => {
+            const { x, y, width: w, height: h } = e.nativeEvent.layout;
+            // Land on the bat in the logo, which hangs right of centre under the moon's tip.
+            if (!landing) setLanding({ x: x + w * 0.6, y: y + h * 0.42 });
+          }}
+          style={{ opacity: logoIn, transform: [{ scale: logoCatch }] }}
         >
-          Echo
-        </Text>
+          <MoonBatLogo size={logoSize} />
+        </Animated.View>
 
-        <Text
-          accessibilityRole="text"
-          adjustsFontSizeToFit
-          numberOfLines={1}
-          style={styles.tagline}
-        >
-          Every story, in every voice.
-        </Text>
+        <Animated.View style={{ alignItems: 'center', opacity: titleIn }}>
+          <Text
+            style={[
+              styles.title,
+              {
+                fontSize: compact ? 60 : 74,
+                lineHeight: compact ? 74 : 90,
+              },
+            ]}
+          >
+            Echo
+          </Text>
 
-        <DividerMoon />
+          <Text
+            accessibilityRole="text"
+            adjustsFontSizeToFit
+            numberOfLines={1}
+            style={styles.tagline}
+          >
+            Every story, in every voice.
+          </Text>
+
+          <DividerMoon />
+        </Animated.View>
       </View>
 
       {/* Interactive navigation buttons */}
-      <View
+      <Animated.View
         style={[
           styles.actions,
+          { opacity: actionsIn, transform: [{ translateY: actionsRise }] },
           {
             paddingHorizontal: Math.max(
               26,
@@ -421,7 +463,7 @@ export default function Welcome() {
             Create account
           </Text>
         </Pressable>
-      </View>
+      </Animated.View>
     </View>
   );
 }
@@ -449,18 +491,12 @@ const styles = StyleSheet.create({
   },
 
   title: {
-    fontFamily: fonts.display,
+    fontFamily: fonts.wordmark, 
     color: '#F1A8CF',
     textAlign: 'center',
     letterSpacing: 0.5,
     paddingBottom: 8,
     marginTop: -6,
-    textShadowColor: 'rgba(241,168,207,0.42)',
-    textShadowOffset: {
-      width: 0,
-      height: 0,
-    },
-    textShadowRadius: 18,
   },
 
   tagline: {
@@ -514,10 +550,6 @@ const styles = StyleSheet.create({
     backgroundColor: '#DF87B6',
     borderWidth: 1.5,
     borderColor: '#EFA2CB',
-    shadowColor: '#D67BB0',
-    shadowOpacity: 0.24,
-    shadowRadius: 14,
-    shadowOffset: { width: 0, height: 4 },
     elevation: 4,
   },
 

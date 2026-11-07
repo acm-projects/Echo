@@ -1,45 +1,35 @@
-import { Pressable, ScrollView, StyleSheet, Text, View, Alert, ActivityIndicator } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as DocumentPicker from 'expo-document-picker';
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
+import { router, useFocusEffect } from 'expo-router';
 
-import { Screen } from '../components/Screen';
+import { Screen } from '../../components/Screen';
 import { colors, fonts, type } from '../../../theme';
+import { getNarrators } from '../../data/narrators';
+import { processBook } from '../../data/bookJobs';
+import { notify } from '../../../lib/notify';
+import { Sheet } from '../../components/Sheet';
+import { ClassicSheet } from '../../components/ClassicSheet';
+import { CLASSICS, useSavedClassics, type Classic } from '../../data/catalog';
 
-const PUBLIC_DOMAIN_BOOKS = [
-  {
-    id: 'pride-prejudice',
-    title: 'Pride and Prejudice',
-    author: 'Jane Austen',
-    year: '1813',
-    accent: '#7D5C75',
-  },
-  {
-    id: 'frankenstein',
-    title: 'Frankenstein',
-    author: 'Mary Shelley',
-    year: '1818',
-    accent: '#45584D',
-  },
-  {
-    id: 'dracula',
-    title: 'Dracula',
-    author: 'Bram Stoker',
-    year: '1897',
-    accent: '#603D49',
-  },
-  {
-    id: 'gatsby',
-    title: 'The Great Gatsby',
-    author: 'F. Scott Fitzgerald',
-    year: '1925',
-    accent: '#3E596A',
-  },
-];
+// The first few classics; See All opens the full catalog.
+const PUBLIC_DOMAIN_BOOKS = CLASSICS.slice(0, 4);
 
 export default function Upload() {
   const [processing, setProcessing] = useState(false);
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
+  const [stage, setStage] = useState<string | null>(null);
+  const [narratorName, setNarratorName] = useState<string | null>(null);
+  const [helpOpen, setHelpOpen] = useState(false);
+  const [openBook, setOpenBook] = useState<Classic | null>(null);
+  const [saved, toggleSaved] = useSavedClassics();
+
+  useFocusEffect(useCallback(() => {
+    getNarrators()
+      .then((state) => setNarratorName(state.voices.find((voice) => voice.id === state.selectedId)?.name ?? null))
+      .catch(() => setNarratorName(null));
+  }, []));
 
   const selectAndProcess = async () => {
     const result = await DocumentPicker.getDocumentAsync({
@@ -50,47 +40,42 @@ export default function Upload() {
     const file = result.assets[0];
     setSelectedFile(file.name);
     setProcessing(true);
+    setStage('Uploading');
     try {
-      const form = new FormData();
-      // Web platform: pass the File object directly
-      // React Native: pass object with uri, name, type
-      if (file.file) {
-        form.append('book', file.file, file.name);
-      } else {
-        form.append('book', { uri: file.uri, name: file.name, type: file.mimeType ?? 'application/octet-stream' } as any);
-      }
-      const response = await fetch(`${process.env.EXPO_PUBLIC_VOICE_SERVER_URL ?? 'http://127.0.0.1:8787'}/api/books/process`, { method: 'POST', body: form });
-      const data = await response.json() as { error?: string; roster?: Array<{ name: string }> };
-      if (!response.ok) throw new Error(data.error ?? 'Book processing failed.');
-      Alert.alert('Book processed', `${data.roster?.length ?? 0} voices found. IndexTTS generated the segment audio.`);
+      const job = await processBook(file, setStage);
+      notify('Book processed', `${job.result?.roster?.length ?? 0} voices found. IndexTTS generated the segment audio.`);
     } catch (error) {
-      Alert.alert('Upload failed', error instanceof Error ? error.message : 'Could not process this file.');
+      notify('Upload failed', error instanceof Error ? error.message : 'Could not process this file.');
     } finally {
       setProcessing(false);
+      setStage(null);
     }
   };
 
   return (
-    <Screen>
+    <Screen scene="tidewater">
       <ScrollView
         showsVerticalScrollIndicator={false}
         contentContainerStyle={s.content}
       >
         <View style={s.header}>
-          <View>
+          <Pressable style={s.back} onPress={() => (router.canGoBack() ? router.back() : router.replace('/Test/library'))} accessibilityRole="button" accessibilityLabel="Go back" hitSlop={8}>
+            <Ionicons name="chevron-back" size={20} color={colors.text} />
+          </Pressable>
+          <View style={{ flex: 1 }}>
             <Text style={type.h1}>Add a Book</Text>
             <Text style={s.subtitle}>
               Upload your own or discover something new.
             </Text>
           </View>
 
-          <Pressable style={s.help}>
-            <Ionicons
-              name="help"
-              size={18}
-              color={colors.dim}
-            />
-          </Pressable>
+            <Pressable style={s.help} onPress={() => setHelpOpen(true)} accessibilityRole="button" accessibilityLabel="How uploading works">
+              <Ionicons
+                name="help"
+                size={18}
+                color={colors.dim}
+              />
+            </Pressable>
         </View>
 
         <Pressable style={s.uploadCard} onPress={selectAndProcess} disabled={processing}>
@@ -103,30 +88,43 @@ export default function Upload() {
           </View>
 
           <Text style={s.uploadTitle}>
-            {processing ? 'Processing with Claude + IndexTTS...' : selectedFile ?? 'Upload a File'}
+            {processing ? selectedFile : selectedFile ?? 'Upload a File'}
           </Text>
 
           <Text style={s.uploadDescription}>
-            Add a book from your device
+            {processing ? `${stage ?? 'Processing'}...` : 'Add a book from your device'}
           </Text>
 
           <Text style={s.fileTypes}>
-            PDF · EPUB · MOBI · Up to 50 MB
+            PDF · EPUB · TXT · MD · Up to 50 MB
           </Text>
+        </Pressable>
+
+        <Pressable style={s.narratorCard} onPress={() => router.push('/narrator-voices')}>
+          <View style={s.narratorIcon}>
+            <Ionicons name="mic-outline" size={22} color={colors.pink} />
+          </View>
+          <View style={s.narratorInfo}>
+            <Text style={s.narratorTitle}>Narrator Voice</Text>
+            <Text style={s.narratorSubtitle} numberOfLines={1}>
+              {narratorName ? `Narrating as ${narratorName}` : 'Create and choose who reads your books'}
+            </Text>
+          </View>
+          <Ionicons name="chevron-forward" size={20} color={colors.faint} />
         </Pressable>
 
         <View style={s.sectionHeader}>
           <View>
-            <Text style={s.sectionTitle}>
-              Public Domain
-            </Text>
+              <Text style={s.sectionTitle}>
+                Public Domain
+              </Text>
 
             <Text style={s.sectionDescription}>
               Books ready to add to your library
             </Text>
           </View>
 
-          <Pressable>
+          <Pressable onPress={() => router.push('/Test/catalog')} accessibilityRole="button">
             <Text style={s.seeAll}>
               See All
             </Text>
@@ -135,10 +133,11 @@ export default function Upload() {
 
         <View style={s.books}>
           {PUBLIC_DOMAIN_BOOKS.map((book) => (
-            <Pressable
-              key={book.id}
-              style={s.bookRow}
-            >
+            <View key={book.id} style={s.bookRow}>
+              <Pressable style={s.bookTap}
+                onPress={() => setOpenBook(book)}
+                accessibilityRole="button"
+              >
               <View
                 style={[
                   s.cover,
@@ -172,26 +171,49 @@ export default function Upload() {
                 </Text>
               </View>
 
+              </Pressable>
               <Pressable
                 style={s.addBookButton}
                 hitSlop={8}
+                onPress={() => toggleSaved(book.id)}
+                accessibilityRole="button"
+                accessibilityLabel={saved.has(book.id) ? 'Remove from saved' : 'Save for later'}
               >
                 <Ionicons
-                  name="add"
-                  size={24}
-                  color={colors.text}
+                  name={saved.has(book.id) ? 'bookmark' : 'add'}
+                  size={saved.has(book.id) ? 20 : 24}
+                  color={saved.has(book.id) ? colors.gold : colors.text}
                 />
               </Pressable>
-            </Pressable>
+            </View>
           ))}
         </View>
 
       </ScrollView>
+
+      <ClassicSheet book={openBook} saved={openBook ? saved.has(openBook.id) : false} onToggle={() => openBook && toggleSaved(openBook.id)} onClose={() => setOpenBook(null)} />
+
+      <Sheet visible={helpOpen} onClose={() => setHelpOpen(false)} title="How uploading works">
+        <View style={{ gap: 12, paddingBottom: 8 }}>
+          {[
+            ['document-text-outline', 'PDF, EPUB, TXT or Markdown, up to 50 MB. The file needs real text; scanned page images can’t be read yet.'],
+            ['people-outline', 'Echo reads the book, finds every character, and gives each one their own voice.'],
+            ['time-outline', 'Short stories take a few minutes. You can leave this screen; we’ll keep working.'],
+            ['mic-outline', 'Your chosen narrator reads everything that isn’t dialogue.'],
+          ].map(([icon, text]) => (
+            <View key={icon} style={{ flexDirection: 'row', gap: 12 }}>
+              <Ionicons name={icon as keyof typeof Ionicons.glyphMap} size={20} color={colors.pink} />
+              <Text style={[type.body, { flex: 1, lineHeight: 21 }]}>{text}</Text>
+            </View>
+          ))}
+        </View>
+      </Sheet>
     </Screen>
   );
 }
 
 const s = StyleSheet.create({
+  back: { width: 40, height: 40, borderRadius: 20, backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border, alignItems: 'center', justifyContent: 'center', marginRight: 12, marginTop: 2 },
   content: {
     padding: 20,
     paddingBottom: 150,
@@ -223,7 +245,7 @@ const s = StyleSheet.create({
 
   uploadCard: {
     minHeight: 200,
-    borderRadius: 26,
+    borderRadius: 12,
     borderWidth: 1.5,
     borderStyle: 'dashed',
     borderColor: 'rgba(214,123,176,0.4)',
@@ -261,6 +283,43 @@ const s = StyleSheet.create({
     marginTop: 8,
   },
 
+  narratorCard: {
+    marginTop: 12,
+    padding: 14,
+    borderRadius: 12,
+    backgroundColor: colors.card,
+    borderWidth: 1,
+    borderColor: colors.border,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+
+  narratorIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(214,123,176,0.14)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  narratorInfo: {
+    flex: 1,
+    marginHorizontal: 12,
+  },
+
+  narratorTitle: {
+    fontFamily: fonts.sansBold,
+    color: colors.text,
+    fontSize: 15,
+  },
+
+  narratorSubtitle: {
+    ...type.meta,
+    color: colors.dim,
+    marginTop: 3,
+  },
+
   sectionHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -291,10 +350,13 @@ const s = StyleSheet.create({
     gap: 10,
   },
 
+  // The row holds two sibling buttons (details, save); nesting them would put a <button> inside a <button> on web.
+  bookTap: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 14 },
+
   bookRow: {
     minHeight: 92,
     padding: 11,
-    borderRadius: 20,
+    borderRadius: 12,
     backgroundColor: colors.card,
     borderWidth: 1,
     borderColor: colors.border,

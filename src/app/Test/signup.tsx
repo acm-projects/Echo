@@ -2,7 +2,6 @@
 import { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   Animated,
   Easing,
   Image,
@@ -19,9 +18,10 @@ import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { FormField } from '../components/FormField';
+import { FormField } from '../../components/FormField';
 import { colors, fonts } from '../../../theme';
 import { supabase } from '../../../lib/supabase';
+import { notify } from '../../../lib/notify';
 
 // Subtle stars matching the login screen
 const STARS = [
@@ -146,7 +146,7 @@ export default function Signup() {
       !password ||
       !confirmPassword
     ) {
-      Alert.alert(
+      notify(
         'Missing information',
         'Please complete all fields.'
       );
@@ -154,7 +154,7 @@ export default function Signup() {
     }
 
     if (password !== confirmPassword) {
-      Alert.alert(
+      notify(
         'Passwords do not match',
         'Enter the same password in both fields.'
       );
@@ -175,17 +175,17 @@ export default function Signup() {
       });
 
       if (error) {
-        Alert.alert('Sign up failed', error.message);
+        notify('Sign up failed', error.message);
         return;
       }
 
       if (!data.session) {
-        Alert.alert(
+        notify(
           'Check your email',
           'Your account request was received. If email confirmation is enabled, follow the verification link before signing in.'
         );
       } else {
-        Alert.alert(
+        notify(
           'Account created',
           'Your Echo account has been created.'
         );
@@ -193,7 +193,7 @@ export default function Signup() {
 
       router.replace('/Test/login');
     } catch {
-      Alert.alert(
+      notify(
         'Something went wrong',
         'Unable to create your account. Please try again.'
       );
@@ -488,9 +488,6 @@ const styles = StyleSheet.create({
     color: '#F1A8CF',
     letterSpacing: 3,
     marginTop: -7,
-    textShadowColor: 'rgba(241,168,207,0.4)',
-    textShadowOffset: { width: 0, height: 0 },
-    textShadowRadius: 15,
   },
 
   ornament: {
@@ -541,10 +538,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginTop: 12,
-    shadowColor: colors.pink,
-    shadowOpacity: 0.22,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 4 },
     elevation: 3,
   },
 
