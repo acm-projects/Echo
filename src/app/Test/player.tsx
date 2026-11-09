@@ -73,6 +73,9 @@ export default function Player() {
     // Start each session at the listener's preferred speed.
     playback.setSpeed(settings.playbackSpeed);
   }, [settings.playbackSpeed]);
+  // The sleep timer runs in playback, so it keeps counting with this screen closed.
+  useEffect(() => playback.setSleepTimer(settings.sleepTimerMinutes), [settings.sleepTimerMinutes]);
+  const sleepLeft = now.sleepEndsAt ? Math.max(1, Math.ceil((now.sleepEndsAt - Date.now()) / 60000)) : 0;
 
   const collapse = () => (router.canGoBack() ? router.back() : router.navigate('/Test/library'));
   const nextSpeed = () => playback.setSpeed(SPEEDS[(SPEEDS.indexOf(now.speed) + 1) % SPEEDS.length]);
@@ -99,8 +102,9 @@ export default function Player() {
           <Text style={s.chapter}>{now.chapter}</Text>
           <View style={s.speaking}>
             <Equalizer active={now.isPlaying} />
-            <Text style={s.speakingText}>{now.isPlaying ? `${now.speaker} is speaking` : 'Paused'}</Text>
+            <Text style={s.speakingText}>{now.isPlaying ? (now.speaker ? `${now.speaker} is speaking` : 'Playing') : 'Paused'}</Text>
           </View>
+          {now.error && <Text style={[type.meta, { color: colors.danger, textAlign: 'center' }]}>{now.error}</Text>}
         </View>
 
         <Pressable
@@ -110,7 +114,7 @@ export default function Player() {
           accessibilityRole="adjustable"
           accessibilityLabel="Seek"
         >
-          <ProgressBar value={now.positionSec / now.durationSec} height={5} />
+          <ProgressBar value={now.durationSec > 0 ? now.positionSec / now.durationSec : 0} height={5} />
         </Pressable>
         <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
           <Text style={type.meta}>{formatTime(now.positionSec)}</Text>
@@ -139,9 +143,9 @@ export default function Player() {
             </Pressable>
             <Pressable onPress={() => update('sleepTimerMinutes', settings.sleepTimerMinutes ? 0 : 30)} style={[s.pill, settings.sleepTimerMinutes > 0 && s.pillOn]} accessibilityRole="button" accessibilityLabel="Sleep timer">
               <Ionicons name="moon-outline" size={14} color={settings.sleepTimerMinutes ? '#14102A' : colors.text} />
-              <Text style={[s.pillText, settings.sleepTimerMinutes > 0 && { color: '#14102A' }]}>{settings.sleepTimerMinutes ? `${settings.sleepTimerMinutes}m` : 'Sleep'}</Text>
+              <Text style={[s.pillText, settings.sleepTimerMinutes > 0 && { color: '#14102A' }]}>{settings.sleepTimerMinutes ? `${sleepLeft || settings.sleepTimerMinutes}m` : 'Sleep'}</Text>
             </Pressable>
-            <Pressable onPress={() => router.push({ pathname: '/Test/book_details', params: { title: now.title, author: now.author } })} style={s.pill} accessibilityRole="button">
+            <Pressable onPress={() => router.push({ pathname: '/Test/book_details', params: { id: now.bookId, title: now.title, author: now.author } })} style={s.pill} accessibilityRole="button">
               <Ionicons name="people-outline" size={14} color={colors.text} />
               <Text style={s.pillText}>Cast</Text>
             </Pressable>
@@ -158,7 +162,7 @@ export default function Player() {
           ))}
         </View>
         <SheetItem icon="moon-outline" label="Sleep timer" detail={settings.sleepTimerMinutes ? `${settings.sleepTimerMinutes} min` : 'Off'} onPress={() => update('sleepTimerMinutes', ({ 0: 15, 15: 30, 30: 45, 45: 60, 60: 0 } as const)[settings.sleepTimerMinutes])} />
-        <SheetItem icon="book-outline" label="Book details & cast" onPress={() => { setMenu(false); router.push({ pathname: '/Test/book_details', params: { title: now.title, author: now.author } }); }} />
+        <SheetItem icon="book-outline" label="Book details & cast" onPress={() => { setMenu(false); router.push({ pathname: '/Test/book_details', params: { id: now.bookId, title: now.title, author: now.author } }); }} />
         <SheetItem icon="options-outline" label="Playback settings" detail="Speed, skip, autoplay" onPress={() => { setMenu(false); router.push('/Test/playback-settings'); }} />
       </Sheet>
     </Screen>

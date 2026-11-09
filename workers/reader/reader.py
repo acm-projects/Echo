@@ -23,17 +23,24 @@ def emit(payload: dict) -> None:
 
 def main() -> None:
     sys.path.insert(0, str(MODEL_DIR))
-    from indextts.infer_v2_5 import IndexTTS2
+    from indextts.infer_v2_5 import IndexTTS2, QwenEmotion
 
     emit({"type": "status", "status": "loading"})
     with redirect_stdout(sys.stderr):
+        # QwenEmotion (text-to-emotion) is a separate language model. Book narration always sends an explicit
+        # emotion vector and never uses it, so it's loaded only when a job first asks for emotion from text.
         tts = IndexTTS2(
             cfg_path=str(MODEL_DIR / "checkpoints" / "config.yaml"),
             model_dir=str(MODEL_DIR / "checkpoints"),
             use_bf16=False,
-            use_qwen_emo=True,
+            use_qwen_emo=False,
         )
     emit({"type": "status", "status": "ready"})
+
+    def ensure_qwen_emotion() -> None:
+        if tts.qwen_emo is None:
+            with redirect_stdout(sys.stderr):
+                tts.qwen_emo = QwenEmotion(os.path.join(tts.model_dir, tts.cfg.qwen_emo_path))
 
     for line in sys.stdin:
         if not line.strip():
@@ -51,10 +58,16 @@ def main() -> None:
                 # weights skip QwenEmotion; apply the same bias and 0.8 cap as the IndexTTS web UI.
                 emotion_args = {"emo_vector": tts.normalize_emo_vec([float(v) for v in emotion_vector], apply_bias=True)}
             elif job.get("emotion"):
+                ensure_qwen_emotion()
                 # IndexTTS recommends emo_alpha around 0.6 for text-derived emotion.
                 emotion_args = {"emo_text": job["emotion"], "use_emo_text": True, "emo_alpha": 0.6}
             else:
                 emotion_args = {}
+            # durationFactor below 1 speaks faster at the same pitch; maxMelTokens (50 per second of speech) stops
+            # the model running on past the words, which it tends to do on very short lines.
+            pacing_args = {"duration_factor": float(job.get("durationFactor", 1.0))}
+            if job.get("maxMelTokens"):
+                pacing_args["max_mel_tokens"] = int(job["maxMelTokens"])
             with redirect_stdout(sys.stderr):
                 tts.infer(
                     spk_audio_prompt=job["referencePath"],
@@ -64,6 +77,7 @@ def main() -> None:
                     use_random=False,
                     verbose=False,
                     **emotion_args,
+                    **pacing_args,
                 )
             os.replace(temporary_path, output_path)
             emit({"type": "result", "jobId": job_id, "outputPath": str(output_path)})
