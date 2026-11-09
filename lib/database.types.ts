@@ -569,6 +569,56 @@ export type Database = {
           },
         ]
       }
+      narrator_voices: {
+        Row: {
+          created_at: string
+          description: string
+          id: string
+          is_selected: boolean
+          name: string
+          preview_path: string
+          reference_path: string
+          sample_text: string
+          updated_at: string
+          user_id: string
+          voice_id: string
+        }
+        Insert: {
+          created_at?: string
+          description: string
+          id?: string
+          is_selected?: boolean
+          name: string
+          preview_path: string
+          reference_path: string
+          sample_text: string
+          updated_at?: string
+          user_id: string
+          voice_id: string
+        }
+        Update: {
+          created_at?: string
+          description?: string
+          id?: string
+          is_selected?: boolean
+          name?: string
+          preview_path?: string
+          reference_path?: string
+          sample_text?: string
+          updated_at?: string
+          user_id?: string
+          voice_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "narrator_voices_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       narration_scripts: {
         Row: {
           alignment: Json

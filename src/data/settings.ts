@@ -67,6 +67,17 @@ export function currentSettings(): Settings {
   return cache ?? DEFAULT_SETTINGS;
 }
 
+/** Changes one setting from outside React (the sleep timer turning itself off, say); screens update immediately. */
+export function saveSetting<K extends keyof Settings>(key: K, value: Settings[K]) {
+  const next = { ...(cache ?? DEFAULT_SETTINGS), [key]: value };
+  cache = next;
+  listeners.forEach((listener) => listener(next));
+  AsyncStorage.setItem(KEY, JSON.stringify(next)).catch(() => {});
+}
+
+/** Loads the saved settings, for code outside React that needs them before any screen has. */
+export const loadSettings = load;
+
 /** Shared settings: every screen using this hook sees updates immediately. */
 export function useSettings() {
   const [settings, setSettings] = useState<Settings>(cache ?? DEFAULT_SETTINGS);
@@ -79,12 +90,7 @@ export function useSettings() {
     };
   }, []);
 
-  const update = useCallback(<K extends keyof Settings>(key: K, value: Settings[K]) => {
-    const next = { ...(cache ?? DEFAULT_SETTINGS), [key]: value };
-    cache = next;
-    listeners.forEach((listener) => listener(next));
-    AsyncStorage.setItem(KEY, JSON.stringify(next)).catch(() => {});
-  }, []);
+  const update = useCallback(<K extends keyof Settings>(key: K, value: Settings[K]) => saveSetting(key, value), []);
 
   return [settings, update] as const;
 }

@@ -27,7 +27,7 @@ export function MiniPlayer({ accent = colors.blue, onOpen }: { accent?: string; 
           <Ionicons name={now.isPlaying ? 'pause' : 'play'} size={20} color="#14102A" style={!now.isPlaying && { marginLeft: 2 }} />
         </Pressable>
       </View>
-      <View style={{ marginTop: 8 }}><ProgressBar value={now.positionSec / now.durationSec} height={3} /></View>
+      <View style={{ marginTop: 8 }}><ProgressBar value={now.durationSec > 0 ? now.positionSec / now.durationSec : 0} height={3} /></View>
     </View>
   );
 }

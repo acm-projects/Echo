@@ -1,9 +1,9 @@
-import { USER_IDS } from '../mock/users';
-import { VOICE_SERVER_URL } from './voiceServer';
+import { VOICE_SERVER_URL, voiceServerHeaders } from './voiceServer';
 
 export { VOICE_SERVER_URL };
 
-// Narrator voices live on the local voice server for now, keyed by the current (mock) user.
+// Narrator voices come from the voice server: the signed-in user's own (also recorded in Supabase's narrator_voices)
+// plus the test narrators made under the mock user.
 
 export type NarratorVoice = {
   id: string;
@@ -27,7 +27,7 @@ export type NarratorState = {
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${VOICE_SERVER_URL}${path}`, {
     ...init,
-    headers: { 'content-type': 'application/json', 'x-echo-user': USER_IDS.current, ...init?.headers },
+    headers: { 'content-type': 'application/json', ...await voiceServerHeaders(), ...init?.headers },
   });
   const data = await response.json() as T & { error?: string };
   if (!response.ok) throw new Error(data.error ?? `Voice server request failed with ${response.status}.`);
