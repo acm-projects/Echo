@@ -5,6 +5,7 @@ export const colors = {
   // Neutral ink rather than purple, so each screen's own scene colours show around it.
   card: 'rgba(10,10,26,0.8)', border: 'rgba(255,255,255,0.12)',
   pink: '#D67BB0', lilac: '#9B6BD6', gold: '#F5C65A', blue: '#7FA8E6', danger: '#E0667A',
+  rose: '#D16E8B',
 };
 // The night city: sky from zenith down to the horizon glow, and the skyline layers in front of it.
 export const night = {
@@ -65,7 +66,12 @@ export const fonts = {
   sans: 'BricolageGrotesque_400Regular',
   sansMd: 'BricolageGrotesque_500Medium',
   sansBold: 'BricolageGrotesque_700Bold',
+  // Added for the welcome and login redesign:
+  wordmark: 'MoonveilStellarion',   // Echo title only
+  button: 'Inter_600SemiBold',
+  tagline: 'Inter_400Regular',
 };
+
 // Small, consistent corners. Large pill shapes are only for circular controls.
 export const radius = { sm: 4, md: 8, lg: 12 };
 export const type = {

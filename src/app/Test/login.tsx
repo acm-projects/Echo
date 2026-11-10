@@ -183,8 +183,6 @@ export default function Login() {
     155
   );
 
-  const compact = height < 720;
-
   const cloudHeight = Math.min(
     height * 0.28,
     270
@@ -273,6 +271,10 @@ export default function Login() {
               Echo
             </Text>
 
+            <Text style={styles.subtitle}>
+              Your next story is waiting
+            </Text>
+
             <View style={styles.ornament}>
               <View style={styles.ornamentLine} />
 
@@ -283,65 +285,52 @@ export default function Login() {
               <View style={styles.ornamentLine} />
             </View>
 
-            <Text
-              style={[
-                styles.welcomeTitle,
-                {
-                  marginTop: compact ? 18 : 25,
-                },
-              ]}
-            >
-              Welcome back
-            </Text>
-
-            <Text style={styles.subtitle}>
-              Your next story is waiting
-            </Text>
-
             {/* Login fields */}
             <View style={styles.form}>
-              <FormField
-                label="EMAIL"
-                icon="mail-outline"
-                placeholder="your email"
-                value={email}
-                onChangeText={setEmail}
-                keyboardType="email-address"
-                autoCapitalize="none"
-              />
+              <View style={styles.fields}>
+                <FormField
+                  label="Email"
+                  icon="mail-outline"
+                  placeholder="name@example.com"
+                  value={email}
+                  onChangeText={setEmail}
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                />
 
-              <FormField
-                label="PASSWORD"
-                icon="lock-closed-outline"
-                placeholder="password"
-                value={password}
-                onChangeText={setPassword}
-                secureTextEntry={!show}
-                right={
-                  <Pressable
-                    onPress={() =>
-                      setShow((current) => !current)
-                    }
-                    accessibilityRole="button"
-                    accessibilityLabel={
-                      show
-                        ? 'Hide password'
-                        : 'Show password'
-                    }
-                    hitSlop={10}
-                  >
-                    <Ionicons
-                      name={
-                        show
-                          ? 'eye-outline'
-                          : 'eye-off-outline'
+                <FormField
+                  label="Password"
+                  icon="lock-closed-outline"
+                  placeholder="Enter your password"
+                  value={password}
+                  onChangeText={setPassword}
+                  secureTextEntry={!show}
+                  right={
+                    <Pressable
+                      onPress={() =>
+                        setShow((current) => !current)
                       }
-                      size={20}
-                      color="#BDA5D3"
-                    />
-                  </Pressable>
-                }
-              />
+                      accessibilityRole="button"
+                      accessibilityLabel={
+                        show
+                          ? 'Hide password'
+                          : 'Show password'
+                      }
+                      hitSlop={10}
+                    >
+                      <Ionicons
+                        name={
+                          show
+                            ? 'eye-outline'
+                            : 'eye-off-outline'
+                        }
+                        size={20}
+                        color="#BDA5D3"
+                      />
+                    </Pressable>
+                  }
+                />
+              </View>
 
               {/* Password recovery left unchanged */}
               <Pressable
@@ -373,7 +362,7 @@ export default function Login() {
                   />
                 ) : (
                   <Text style={styles.signInText}>
-                    SIGN IN
+                    Login
                   </Text>
                 )}
               </Pressable>
@@ -398,7 +387,7 @@ export default function Login() {
                 ]}
               >
                 <Text style={styles.signUpText}>
-                  New here? Create account
+                  Create account
                 </Text>
               </Pressable>
             </View>
@@ -457,18 +446,21 @@ const styles = StyleSheet.create({
   },
 
   logoText: {
-    fontFamily: fonts.serif,
+    fontFamily: fonts.wordmark,
     fontSize: 46,
     color: '#F1A8CF',
-    letterSpacing: 3,
+    letterSpacing: 0.5,
     marginTop: -5,
+    lineHeight: 62,
+    paddingBottom: 8,
   },
 
   ornament: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
-    marginTop: 7,
+    marginTop: 12,
+    marginBottom: 18,
   },
 
   ornamentLine: {
@@ -483,20 +475,12 @@ const styles = StyleSheet.create({
     color: colors.gold,
   },
 
-  welcomeTitle: {
-    fontFamily: fonts.serif,
-    fontSize: 30,
-    color: '#F3D8F1',
-    textAlign: 'center',
-  },
-
   subtitle: {
-    fontFamily: fonts.sans,
-    fontSize: 14,
-    color: '#CBB6E0',
+    fontFamily: fonts.tagline,
+    fontSize: 17,
+    color: colors.dim,
     textAlign: 'center',
-    marginTop: 8,
-    marginBottom: 25,
+    marginTop: 2,
   },
 
   form: {
@@ -504,9 +488,13 @@ const styles = StyleSheet.create({
     maxWidth: 420,
   },
 
+  fields: {
+    gap: 2,
+  },
+
   forgotPassword: {
     alignSelf: 'flex-end',
-    marginTop: 0,
+    marginTop: -8,
     marginBottom: 15,
     paddingVertical: 5,
   },
@@ -529,9 +517,9 @@ const styles = StyleSheet.create({
   },
 
   signInText: {
-    fontFamily: fonts.sansBold,
-    fontSize: 15,
-    letterSpacing: 2,
+    fontFamily: fonts.button,
+    fontSize: 17,
+    letterSpacing: 0.3,
     color: '#29123C',
   },
 
@@ -539,7 +527,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
-    marginVertical: 20,
+    marginVertical: 18,
   },
 
   dividerLine: {
@@ -566,12 +554,13 @@ const styles = StyleSheet.create({
   },
 
   signUpText: {
-    fontFamily: fonts.sansBold,
-    fontSize: 14,
+    fontFamily: fonts.button,
+    fontSize: 17,
     color: '#F1A8CF',
   },
 
   pressed: {
-    opacity: 0.78,
+    opacity: 0.82,
+    transform: [{ scale: 0.985 }],
   },
 });

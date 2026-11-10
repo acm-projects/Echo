@@ -207,8 +207,7 @@ export default function Signup() {
     router.replace('/Test/welcome');
   };
 
-  const logoSize = Math.min(width * 0.30, 125);
-  const compact = height < 720;
+  const logoSize = Math.min(width * 0.24, 100);
   const cloudHeight = Math.min(height * 0.28, 270);
 
   return (
@@ -259,8 +258,8 @@ export default function Signup() {
           contentContainerStyle={[
             styles.scrollContent,
             {
-              paddingTop: insets.top + 65,
-              paddingBottom: insets.bottom + 32,
+              paddingTop: insets.top + 42,
+              paddingBottom: insets.bottom + 20,
             },
           ]}
           keyboardShouldPersistTaps="handled"
@@ -286,112 +285,110 @@ export default function Signup() {
             {/* Echo wordmark */}
             <Text style={styles.logoText}>Echo</Text>
 
+            <Text style={styles.subtitle}>
+              Start building your listening world
+            </Text>
+
             <View style={styles.ornament}>
               <View style={styles.ornamentLine} />
               <Text style={styles.smallMoon}>☾</Text>
               <View style={styles.ornamentLine} />
             </View>
 
-            {/* Signup heading */}
-            <Text
-              style={[
-                styles.heading,
-                { marginTop: compact ? 14 : 22 },
-              ]}
-            >
-              Create your account
-            </Text>
-
-            <Text style={styles.subtitle}>
-              Start building your listening world
-            </Text>
-
             {/* Signup fields */}
             <View style={styles.form}>
-              <FormField
-                label="USERNAME"
-                icon="person-outline"
-                placeholder="your username"
-                value={username}
-                onChangeText={setUsername}
-                autoCapitalize="none"
-              />
+              <View style={styles.compactField}>
+                <FormField
+                  label="Username"
+                  icon="person-outline"
+                  placeholder="Choose a username"
+                  value={username}
+                  onChangeText={setUsername}
+                  autoCapitalize="none"
+                />
+              </View>
 
-              <FormField
-                label="EMAIL"
-                icon="mail-outline"
-                placeholder="your email"
-                value={email}
-                onChangeText={setEmail}
-                keyboardType="email-address"
-                autoCapitalize="none"
-              />
+              <View style={styles.compactField}>
+                <FormField
+                  label="Email"
+                  icon="mail-outline"
+                  placeholder="name@example.com"
+                  value={email}
+                  onChangeText={setEmail}
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                />
+              </View>
 
-              <FormField
-                label="PASSWORD"
-                icon="lock-closed-outline"
-                placeholder="password"
-                value={password}
-                onChangeText={setPassword}
-                secureTextEntry={!showPassword}
-                right={
-                  <Pressable
-                    onPress={() =>
-                      setShowPassword((value) => !value)
-                    }
-                    accessibilityRole="button"
-                    accessibilityLabel={
-                      showPassword
-                        ? 'Hide password'
-                        : 'Show password'
-                    }
-                    hitSlop={10}
-                  >
-                    <Ionicons
-                      name={
+              <View style={styles.compactField}>
+                <FormField
+                  label="Password"
+                  icon="lock-closed-outline"
+                  placeholder="Create a password"
+                  value={password}
+                  onChangeText={setPassword}
+                  secureTextEntry={!showPassword}
+                  right={
+                    <Pressable
+                      onPress={() =>
+                        setShowPassword((value) => !value)
+                      }
+                      accessibilityRole="button"
+                      accessibilityLabel={
                         showPassword
-                          ? 'eye-outline'
-                          : 'eye-off-outline'
+                          ? 'Hide password'
+                          : 'Show password'
                       }
-                      size={20}
-                      color="#BDA5D3"
-                    />
-                  </Pressable>
-                }
-              />
+                      hitSlop={10}
+                    >
+                      <Ionicons
+                        name={
+                          showPassword
+                            ? 'eye-outline'
+                            : 'eye-off-outline'
+                        }
+                        size={20}
+                        color="#BDA5D3"
+                      />
+                    </Pressable>
+                  }
+                />
+              </View>
 
-              <FormField
-                label="CONFIRM PASSWORD"
-                icon="lock-closed-outline"
-                placeholder="confirm password"
-                value={confirmPassword}
-                onChangeText={setConfirmPassword}
-                secureTextEntry={!showConfirmPassword}
-                right={
-                  <Pressable
-                    onPress={() =>
-                      setShowConfirmPassword((value) => !value)
-                    }
-                    accessibilityRole="button"
-                    accessibilityLabel={
-                      showConfirmPassword
-                        ? 'Hide password confirmation'
-                        : 'Show password confirmation'
-                    }
-                    hitSlop={10}
-                  >
-                    <Ionicons
-                      name={
-                        showConfirmPassword
-                          ? 'eye-outline'
-                          : 'eye-off-outline'
+              <View style={styles.compactField}>
+                <FormField
+                  label="Confirm password"
+                  icon="lock-closed-outline"
+                  placeholder="Re-enter your password"
+                  value={confirmPassword}
+                  onChangeText={setConfirmPassword}
+                  secureTextEntry={!showConfirmPassword}
+                  right={
+                    <Pressable
+                      onPress={() =>
+                        setShowConfirmPassword((value) => !value)
                       }
-                      size={20}
-                      color="#BDA5D3"
-                    />
-                  </Pressable>
-                }
-              />
+                      accessibilityRole="button"
+                      accessibilityLabel={
+                        showConfirmPassword
+                          ? 'Hide password confirmation'
+                          : 'Show password confirmation'
+                      }
+                      hitSlop={10}
+                    >
+                      <Ionicons
+                        name={
+                          showConfirmPassword
+                            ? 'eye-outline'
+                            : 'eye-off-outline'
+                        }
+                        size={20}
+                        color="#BDA5D3"
+                      />
+                    </Pressable>
+                  }
+                />
+              </View>
 
               {/* Create account button */}
               <Pressable
@@ -407,7 +404,7 @@ export default function Signup() {
                   <ActivityIndicator color="#29123C" />
                 ) : (
                   <Text style={styles.createButtonText}>
-                    CREATE ACCOUNT
+                    Create account
                   </Text>
                 )}
               </Pressable>
@@ -425,7 +422,7 @@ export default function Signup() {
                 ]}
               >
                 <Text style={styles.signInText}>
-                  Already have an account? Sign in
+                  Already have an account? Login
                 </Text>
               </Pressable>
             </View>
@@ -483,18 +480,21 @@ const styles = StyleSheet.create({
   },
 
   logoText: {
-    fontFamily: fonts.serif,
+    fontFamily: fonts.wordmark,
     fontSize: 42,
     color: '#F1A8CF',
-    letterSpacing: 3,
-    marginTop: -7,
+    letterSpacing: 0.5,
+    lineHeight: 58,
+    paddingBottom: 8,
+    marginTop: -5,
   },
 
   ornament: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
-    marginTop: 5,
+    marginTop: 12,
+    marginBottom: 18,
   },
 
   ornamentLine: {
@@ -508,25 +508,21 @@ const styles = StyleSheet.create({
     color: colors.gold,
   },
 
-  heading: {
-    fontFamily: fonts.serif,
-    fontSize: 29,
-    color: '#F3D8F1',
-    textAlign: 'center',
-  },
-
   subtitle: {
-    fontFamily: fonts.sans,
-    fontSize: 14,
-    color: '#CBB6E0',
+    fontFamily: fonts.tagline,
+    fontSize: 17,
+    color: colors.dim,
     textAlign: 'center',
-    marginTop: 8,
-    marginBottom: 22,
+    marginTop: 2,
   },
 
   form: {
     width: '100%',
     maxWidth: 420,
+  },
+
+  compactField: {
+    marginBottom: -12,
   },
 
   createButton: {
@@ -542,9 +538,9 @@ const styles = StyleSheet.create({
   },
 
   createButtonText: {
-    fontFamily: fonts.sansBold,
-    fontSize: 15,
-    letterSpacing: 2,
+    fontFamily: fonts.button,
+    fontSize: 17,
+    letterSpacing: 0.3,
     color: '#29123C',
   },
 
@@ -553,7 +549,7 @@ const styles = StyleSheet.create({
     borderRadius: 30,
     borderWidth: 1.5,
     borderColor: '#E894C5',
-    backgroundColor: 'rgba(55,24,83,0.85)',
+    backgroundColor: 'rgba(55,24,83,0.55)',
     alignItems: 'center',
     justifyContent: 'center',
     marginTop: 14,
@@ -561,13 +557,14 @@ const styles = StyleSheet.create({
   },
 
   signInText: {
-    fontFamily: fonts.sansBold,
-    fontSize: 14,
+    fontFamily: fonts.button,
+    fontSize: 17,
     color: '#F1A8CF',
     textAlign: 'center',
   },
 
   pressed: {
-    opacity: 0.78,
+    opacity: 0.82,
+    transform: [{ scale: 0.985 }],
   },
 });
