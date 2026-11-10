@@ -7,6 +7,7 @@ import { night, scenes, type Scene } from '../../../theme';
 import { FlyingBat } from './Bat';
 import { NightCity, type CityVariant } from './NightCity';
 import { TALL_SHARE, tallness } from './perchRegistry';
+import { MOTION_KEYS, useSettings, type MotionKind } from '../../data/settings';
 
 export function useReducedMotion() {
   const [reduced, setReduced] = useState(false);
@@ -16,6 +17,13 @@ export function useReducedMotion() {
     return () => sub.remove();
   }, []);
   return reduced;
+}
+
+/** Whether this kind of animation should play: on in Settings, and the OS isn't asking for reduced motion. */
+export function useMotion(kind: MotionKind) {
+  const reduced = useReducedMotion();
+  const [settings] = useSettings();
+  return !reduced && settings[MOTION_KEYS[kind]];
 }
 
 // [x%, y%, radius, twinkles]
@@ -151,7 +159,7 @@ const LANTERNS = [
  */
 export function NightSky({ city = true, variant = 'calm', scrollY, scene = scenes.midnight, record = false, lanterns = false }: { city?: boolean; variant?: CityVariant; scrollY?: Animated.Value; scene?: Scene; record?: boolean; lanterns?: boolean }) {
   const { width, height } = useWindowDimensions();
-  const reduced = useReducedMotion();
+  const reduced = !useMotion('background');
   const hero = variant === 'hero';
   const cityHeight = hero ? Math.min(240, height * 0.27) : Math.min(170, height * 0.2);
   return (
@@ -179,7 +187,7 @@ export function NightSky({ city = true, variant = 'calm', scrollY, scene = scene
  */
 export function CityHero({ height, scrollY, scene = scenes.dusk, children }: { height: number; scrollY?: Animated.Value; scene?: Scene; children?: React.ReactNode }) {
   const { width } = useWindowDimensions();
-  const reduced = useReducedMotion();
+  const reduced = !useMotion('background');
   return (
     <View style={{ height, overflow: 'hidden' }}>
       {/* Horizon glow behind the skyline: the scene's sunset or city light */}

@@ -4,11 +4,16 @@ import { colors, fonts, scenes, type SceneName } from '../../theme';
 import { FlyingBat } from './night/Bat';
 import { NightCity } from './night/NightCity';
 import { useReducedMotion } from './night/NightSky';
+import { LoadingDots } from './LoadingDots';
+import { useSettings } from '../data/settings';
 
 /** In-page loading state: a little cityscape with its lights coming on while the bat flies across. */
 export function CityLoader({ scene = 'midnight', label = 'Lighting up the cityâ€¦' }: { scene?: SceneName; label?: string }) {
   const [width, setWidth] = useState(0);
-  const reduced = useReducedMotion();
+  const [settings] = useSettings();
+  // With the loading bat switched off, just the words.
+  const showBat = settings.motionLoader;
+  const reduced = useReducedMotion() || !showBat;
   const fly = useRef(new Animated.Value(0)).current;
   useEffect(() => {
     if (reduced) return;
@@ -18,8 +23,8 @@ export function CityLoader({ scene = 'midnight', label = 'Lighting up the cityâ€
   }, [fly, reduced]);
 
   return (
-    <View style={s.wrap} onLayout={(e) => setWidth(e.nativeEvent.layout.width)} accessibilityRole="progressbar" accessibilityLabel={label}>
-      {width > 0 && (
+    <View style={[s.wrap, !showBat && { height: 64 }]} onLayout={(e) => setWidth(e.nativeEvent.layout.width)} accessibilityRole="progressbar" accessibilityLabel={label}>
+      {width > 0 && showBat && (
         <>
           <View style={s.city}>
             <NightCity width={width} height={90} scene={scenes[scene]} />
@@ -29,13 +34,14 @@ export function CityLoader({ scene = 'midnight', label = 'Lighting up the cityâ€
           </Animated.View>
         </>
       )}
+      <LoadingDots size={14} />
       <Text style={s.label}>{label}</Text>
     </View>
   );
 }
 
 const s = StyleSheet.create({
-  wrap: { height: 140, justifyContent: 'flex-end', marginVertical: 12, overflow: 'hidden' },
+  wrap: { height: 160, justifyContent: 'flex-end', marginVertical: 12, overflow: 'hidden' },
   city: { position: 'absolute', left: 0, right: 0, top: 0, height: 100 },
-  label: { fontFamily: fonts.serifItalic, fontSize: 14, color: colors.dim, textAlign: 'center' },
+  label: { fontFamily: fonts.serifItalic, fontSize: 13, marginTop: 4, color: colors.dim, textAlign: 'center' },
 });

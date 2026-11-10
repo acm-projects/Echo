@@ -9,9 +9,8 @@ import { useState, useEffect } from 'react';
 type Icon = keyof typeof Ionicons.glyphMap;
 const ROWS: { icon: Icon; label: string; href: Href }[] = [
   { icon: 'download-outline', label: 'Downloads', href: '/Test/downloads' },
-  { icon: 'options-outline', label: 'Playback settings', href: { pathname: '/Test/settings', params: { section: 'playback' } } },
-  { icon: 'pulse-outline', label: 'Voice preferences', href: { pathname: '/Test/settings', params: { section: 'voice' } } },
-  { icon: 'notifications-outline', label: 'Notifications', href: { pathname: '/Test/settings', params: { section: 'notifications' } } },
+  { icon: 'notifications-outline', label: 'Notifications', href: '/Test/notification-settings' },
+  { icon: 'sparkles-outline', label: 'Animations', href: '/Test/animation-settings' },
   { icon: 'help-circle-outline', label: 'Help & support', href: '/Test/help' },
 ];
 
@@ -69,10 +68,7 @@ export default function Profile() {
   return (
     <Screen>
       <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 32 }} showsVerticalScrollIndicator={false}>
-        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-          <Text style={type.h1}>Profile</Text>
-          <Pressable style={s.gear} onPress={() => router.push('/Test/settings')} accessibilityRole="button" accessibilityLabel="Settings"><Ionicons name="settings-outline" size={22} color={colors.text} /></Pressable>
-        </View>
+        <Text style={type.h1}>Profile</Text>
 
         <View style={{ alignItems: 'center', marginVertical: 24, gap: 6 }}>
           <View style={s.avatar}>
@@ -119,7 +115,6 @@ function Row({ icon, label, danger, last, onPress }: { icon: Icon; label: string
 }
 
 const s = StyleSheet.create({
-  gear: { width: 44, height: 44, borderRadius: 10, backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border, alignItems: 'center', justifyContent: 'center' },
   avatar: { width: 96, height: 96, borderRadius: 48, borderWidth: 2, borderColor: 'rgba(214,123,176,0.4)', alignItems: 'center', justifyContent: 'center', marginBottom: 6 },
   stats: { flexDirection: 'row', borderRadius: 12, backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border, paddingVertical: 18 },
   stat: { flex: 1, alignItems: 'center' },

@@ -1,17 +1,19 @@
 import { useLayoutEffect, useEffect, useRef, useState } from 'react';
-import { Animated, Easing, StyleSheet, View, useWindowDimensions } from 'react-native';
+import { Animated, Easing, Image, StyleSheet, View, useWindowDimensions } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import Svg, { Circle, Path, Rect } from 'react-native-svg';
+import Svg, { Circle, Path } from 'react-native-svg';
 import { router, usePathname } from 'expo-router';
 import { night, scenes, type SceneName } from '../../../theme';
 import { FlyingBat, HangingBat } from './Bat';
 import { NightCity, cityPerch } from './NightCity';
-import { TALL_SHARE, tallness, arrival, batSpot, departing, setBatSpot, cityFor, onPerchesChange, screenReadySince, setTraveling, skylineSpot, type Frame, type Spot } from './perchRegistry';
+import { TALL_SHARE, tallness, arrival, batSpot, departing, setBatSpot, cityFor, moonFrame, onPerchesChange, screenReadySince, setTraveling, skylineSpot, type Frame, type Spot } from './perchRegistry';
 import { useReducedMotion } from './NightSky';
+import { MOTION_KEYS, currentSettings, useSettings, type MotionKind } from '../../data/settings';
 import { interiorForPath, sceneForPath } from './sceneStore';
 import { INTERIOR_COLORS, type InteriorKind } from './Interiors';
 import { landmarkDoor } from './Landmarks';
 import { Landscape, type LandscapeKind } from './Landscape';
+import { LoadingDots } from '../LoadingDots';
 
 // `takeoff` is where the roaming bat was the instant the trip began, captured once so it can't drift mid-flight.
 type Trip =
@@ -19,7 +21,14 @@ type Trip =
   // Into a building from a tab (enter) or back out to one (exit); `city` is the tab's scene.
   | { mode: 'enter' | 'exit'; city: SceneName; interior: InteriorKind; dir: number; takeoff: Spot | null }
   // Signing in: the bat leaves the moon, parts the clouds and flies into the city.
-  | { mode: 'arrive'; to: SceneName; dir: number; takeoff: null };
+  | { mode: 'arrive'; to: SceneName; dir: number; takeoff: null }
+  // Signing out: the bat rises out of the city, the clouds close beneath it and it flies home to the moon.
+  | { mode: 'leave'; from: SceneName; dir: number; takeoff: Spot | null };
+
+// Which Settings switch each trip answers to.
+const MOTION_FOR: Record<Trip['mode'], MotionKind> = { swipe: 'navigation', enter: 'rooms', exit: 'rooms', arrive: 'opening', leave: 'opening' };
+let reduceMotion = false;
+const allowed = (kind: MotionKind) => !reduceMotion && currentSettings()[MOTION_KEYS[kind]];
 
 // Before any navigation the current screen says goodbye, and only then does the route change.
 // - Tab trips (a different outdoor scene) are run entirely by BatTransition, which quietly swaps the small city for
@@ -27,10 +36,17 @@ type Trip =
 // - Anything else: the city eases down and fades, then the buttons fade, then we navigate and a trip may follow.
 // Every navigation goes through here (see installDepartures), with `dest` when we know where it's going.
 let leaving = false;
-let reduceMotion = false;
 let startSwipe: ((dest: string, go: () => void) => boolean) | null = null;
+// What a navigation to `dest` would play, from where we are now (null: no trip, just the goodbye fade).
+let tripTo: ((dest: string) => Trip['mode'] | null) | null = null;
 export function depart(go: () => void, dest?: string) {
-  if (leaving || reduceMotion) return go();
+  // One trip at a time: while the bat is flying (or the screen is saying goodbye), further taps are ignored, so you
+  // can switch again only once it has landed. With the animations switched off nothing plays, so nothing waits.
+  if (leaving || tripRunning) return;
+  if ((dest && QUIET_ROUTES.has(dest)) || QUIET_ROUTES.has(visited[visited.length - 1] ?? '')) return go();
+  const kind = dest && tripTo ? tripTo(dest) : null;
+  // Switched off in Settings: go straight there. Plain page changes count as navigation.
+  if (!allowed(kind ? MOTION_FOR[kind] : 'navigation')) return go();
   if (dest && startSwipe?.(dest, go)) return;
   leaving = true;
   Animated.sequence([
@@ -80,12 +96,18 @@ const TIMING = {
   // Tab trips: 0.00–0.08 swap to the big skyline, then the bat flies off-stage (OFFSTAGE) and we navigate, then it
   // flies back in from the other side.
   swipe: { total: 3400, pause: 0.45, reveal: 0.78 },
-  enter: { total: 2400, pause: 0.56, reveal: 0.86 },
-  exit: { total: 2400, pause: 0.56, reveal: 0.08 },
+  enter: { total: 2000, pause: 0.56, reveal: 0.86 },
+  exit: { total: 2000, pause: 0.56, reveal: 0.08 },
   arrive: { total: 4400, pause: 0.6, reveal: 0.86 },
+  leave: { total: 4400, pause: 0.45, reveal: 0.9 },
 } as const;
 // Routes outside the city. Leaving one of these into the app plays the arrival.
 const AUTH_ROUTES = new Set(['/', '/Test/welcome', '/Test/login', '/Test/signup', '/login']);
+// Same order as the tab bar in Test/(tabs)/_layout.tsx, so the bat flies toward the tab you picked. Signing in lands
+// on one of these.
+const TAB_ORDER = ['/Test/library', '/Test/shelf', '/Test/community', '/Test/profile'];
+// Pages that open and close plainly, with no trip and no goodbye: playback settings, opened from the player.
+const QUIET_ROUTES = new Set(['/Test/playback-settings']);
 // When the bat has left the frame on a tab trip; the route changes then, out of sight.
 const OFFSTAGE = 0.4;
 // Give up waiting and land anyway after this long.
@@ -98,8 +120,22 @@ const STARS: [number, number, number][] = (() => {
   return Array.from({ length: 26 }, () => [rand() * 100, rand() * 60, 0.35 + rand() * 0.5]);
 })();
 
-// Same order as the tab bar in Test/(tabs)/_layout.tsx, so the bat flies toward the tab you picked.
-const TAB_ORDER = ['/Test/library', '/Test/shelf', '/Test/community', '/Test/profile'];
+
+type Place = { path: string; scene: SceneName | null; interior: InteriorKind | null };
+
+// The trip a route change plays, decided from the route alone.
+function tripKind(prev: Place, path: string): Trip['mode'] | null {
+  if (QUIET_ROUTES.has(path) || QUIET_ROUTES.has(prev.path)) return null;
+  const outdoor = sceneForPath(path);
+  const interior = interiorForPath(path);
+  const scene = outdoor ?? prev.scene;
+  if (AUTH_ROUTES.has(prev.path)) return TAB_ORDER.includes(path) && outdoor ? 'arrive' : null;
+  if (AUTH_ROUTES.has(path)) return prev.scene ? 'leave' : null;
+  if (interior && !prev.interior && prev.scene) return 'enter';
+  if (prev.interior && !interior && outdoor) return 'exit';
+  if (!interior && !prev.interior && prev.scene && scene && scene !== prev.scene) return 'swipe';
+  return null;
+}
 
 // +1 = travel right, -1 = travel left. Between tabs, compare their positions on the bar. Otherwise, returning to a
 // page we've already passed through is going back (left); anywhere new is forward (right). `history` is trimmed or
@@ -123,17 +159,23 @@ const lerp = (p: Animated.Value) => <T extends number | string>(input: number[],
 const bx = (spot: Spot) => spot.x + 6 - BAT / 2;
 const by = (spot: Spot) => spot.y - BAT * 0.3;
 
-// Where a scene's city and perch really are on screen, falling back to a city along the bottom edge.
-function cityFrame(name: SceneName, width: number, height: number): Frame {
+// A city along the bottom edge, for when a screen's own isn't known or isn't on screen.
+function defaultFrame(width: number, height: number): Frame {
   const cityH = Math.min(220, height * 0.28);
-  return cityFor(name) ?? { x: 0, y: height - cityH, width, height: cityH, hero: false };
+  return { x: 0, y: height - cityH, width, height: cityH, hero: false };
+}
+// Where a scene's city really is on screen.
+function cityFrame(name: SceneName, width: number, height: number): Frame {
+  return cityFor(name) ?? defaultFrame(width, height);
+}
+// The skyline perch on a given city frame, ignoring what the screen recorded.
+function computedPerch(name: SceneName, frame: Frame): Spot {
+  const local = cityPerch(scenes[name], frame.width, frame.height, frame.hero);
+  return { x: frame.x + local.x, y: frame.y + local.y };
 }
 // The next screen's skyline perch, where the bat lands; computed from the city if the screen hasn't recorded it yet.
 function perchSpot(name: SceneName, frame: Frame): Spot {
-  const recorded = skylineSpot(name);
-  if (recorded) return recorded;
-  const local = cityPerch(scenes[name], frame.width, frame.height, frame.hero);
-  return { x: frame.x + local.x, y: frame.y + local.y };
+  return skylineSpot(name) ?? computedPerch(name, frame);
 }
 // Where the bat takes off from: wherever it was roaming when the trip began, or the screen's skyline perch.
 function takeoffSpot(trip: Trip, name: SceneName, frame: Frame): Spot {
@@ -141,10 +183,14 @@ function takeoffSpot(trip: Trip, name: SceneName, frame: Frame): Spot {
 }
 
 // A copy of a screen's city, drawn exactly where it sits on screen so the overlay starts and ends seamlessly.
-function CityAt({ frame, scene, style }: { frame: Frame; scene: SceneName; style?: object }) {
+// Screens end above the tab bar, so their city does too; the overlay covers the whole window, so the buildings carry
+// on down to its foot (`bottom`) rather than floating over empty sky.
+function CityAt({ frame, scene, bottom, style }: { frame: Frame; scene: SceneName; bottom: number; style?: object }) {
+  const below = Math.max(0, bottom - (frame.y + frame.height));
   return (
-    <Animated.View style={[{ position: 'absolute', left: frame.x, top: frame.y, width: frame.width, height: frame.height, transformOrigin: 'bottom' }, style]}>
+    <Animated.View style={[{ position: 'absolute', left: frame.x, top: frame.y, width: frame.width, height: frame.height + below, transformOrigin: 'bottom' }, style]}>
       <NightCity width={frame.width} height={frame.height} animated={false} variant={frame.hero ? 'hero' : 'calm'} scene={scenes[scene]} />
+      {below > 0 && <View style={{ position: 'absolute', left: 0, right: 0, top: frame.height - 1, height: below + 1, backgroundColor: scenes[scene].near }} />}
     </Animated.View>
   );
 }
@@ -170,11 +216,12 @@ function Stars() {
  */
 function DoorTrip({ p, trip, width, height }: { p: Animated.Value; trip: Extract<Trip, { mode: 'enter' | 'exit' }>; width: number; height: number }) {
   const scene = scenes[trip.city];
-  const frame = cityFrame(trip.city, width, height);
-  // Entering, the bat leaves from wherever it is; exiting (played backwards), it ends on the skyline perch.
-  const perch = trip.mode === 'enter' ? takeoffSpot(trip, trip.city, frame) : perchSpot(trip.city, frame);
+  // The screen's own city is mostly hidden behind the tab bar (or scrolled away, on Library), so the trip draws a full
+  // one along the foot of the screen and the bat sets out from its skyline perch, flying in through the landmark door.
+  const frame = defaultFrame(width, height);
   const local = landmarkDoor(scene.landmark, { width: frame.width, height: frame.height });
   const door = { x: frame.x + local.x, y: frame.y + local.y };
+  const perch = computedPerch(trip.city, frame);
   const cover = (Math.hypot(width, height) * 2.2) / 24;
   const r = lerp(p);
   // Entering clears at the end of the timeline; exiting (played backwards) clears as it nears 0.
@@ -189,7 +236,7 @@ function DoorTrip({ p, trip, width, height }: { p: Animated.Value; trip: Extract
         </Animated.View>
         {/* The camera pushes in on the doorway */}
         {/* Entering, the screen's city has just sunk away (depart), so it eases back up before the camera pushes in */}
-        <CityAt frame={frame} scene={trip.city} style={{ transformOrigin: `${local.x}px ${local.y}px`, opacity: trip.mode === 'enter' ? r([0, 0.1], [0, 1]) : 1, transform: [{ translateY: trip.mode === 'enter' ? r([0, 0.1], [36, 0]) : 0 }, { scale: r([0.3, 0.85], [1, 16]) }] }} />
+        <CityAt frame={frame} scene={trip.city} bottom={height} style={{ transformOrigin: `${local.x}px ${local.y}px`, opacity: trip.mode === 'enter' ? r([0, 0.1], [0, 1]) : 1, transform: [{ translateY: trip.mode === 'enter' ? r([0, 0.1], [36, 0]) : 0 }, { scale: r([0.3, 0.85], [1, 16]) }] }} />
         {/* The room's colour floods out of the doorway */}
         <Animated.View style={{ position: 'absolute', left: door.x - 12, top: door.y - 12, width: 24, height: 24, borderRadius: 12, backgroundColor: INTERIOR_COLORS[trip.interior], opacity: r([0.46, 0.52], [0, 1]), transform: [{ scale: r([0.5, 0.88], [0.4, cover]) }] }} />
       </Animated.View>
@@ -284,13 +331,87 @@ function SkylineTrip({ p, trip, width, height }: { p: Animated.Value; trip: Extr
   );
 }
 
-// A soft bank of cloud: overlapping puffs along the top of a solid base. `side` mirrors it for the right half.
-function CloudBank({ width, height, color }: { width: number; height: number; color: string }) {
-  const puffs = [0.08, 0.26, 0.44, 0.62, 0.8, 0.98].map((x, i) => ({ cx: x * width, cy: height * (0.36 + (i % 2) * 0.1), r: height * (0.3 + (i % 3) * 0.06) }));
+const CLOUDS = require('../../../assets/images/echo-cloud-frame.png');
+const LOGO = require('../../../assets/images/echo-logo.png');
+const LOGIN_SKY = '#170033';
+
+// Banks of cloud stacked up the screen, each its own drift direction, so the sky clears like weather rather than
+// splitting in two. `top` is where a bank's crest starts, as a fraction of the screen height; `shift` staggers the
+// valleys so they don't line up. Each bank keeps the art's own proportions and is solid cloud beneath.
+const BANKS = [
+  { top: -0.02, dir: -1, shift: 0.22, flip: false },
+  { top: 0.14, dir: 1, shift: -0.3, flip: true },
+  { top: 0.3, dir: -1, shift: 0.12, flip: true },
+  { top: 0.46, dir: 1, shift: -0.18, flip: false },
+];
+// The colour along the bottom of the cloud art, for the cloud body under each bank.
+const CLOUD_BODY = '#5C3576';
+const CLOUD_ASPECT = 700 / 1200;
+
+// The cloud image three wide (mirrored either side, overlapping a hair so no seam shows), so a bank can slide most
+// of a screen without its end showing. `fill` extends it with solid cloud below, down to that depth.
+function CloudStrip({ width, height, fill = 0 }: { width: number; height: number; fill?: number }) {
   return (
-    <Svg width={width} height={height}>
-      <Rect x={0} y={height * 0.45} width={width} height={height * 0.55} fill={color} />
-      {puffs.map((c, i) => <Circle key={i} cx={c.cx} cy={c.cy} r={c.r} fill={color} />)}
+    <View style={{ position: 'absolute', left: -width, top: 0, width: width * 3, height: height + fill }}>
+      {[-1, 1, -1].map((sx, i) => (
+        <Image key={i} source={CLOUDS} resizeMode="stretch" style={{ position: 'absolute', left: i * width - 1, top: 0, width: width + 2, height, transform: [{ scaleX: sx }] }} />
+      ))}
+      {fill > 0 && <View style={{ position: 'absolute', left: 0, right: 0, top: height - 1, height: fill + 1, backgroundColor: CLOUD_BODY }} />}
+    </View>
+  );
+}
+
+/**
+ * The sign-in screens' clouds, as weather. `rest` is the screen's own cloud frame along the foot of the screen.
+ * `cover` 0 → 1 brings the other banks up from below until they fill the view. `clear` 0 → 1 drifts every bank off
+ * toward its own side as it thins out, the higher banks first and the screen's own frame last.
+ */
+function CloudCover({ width, height, rest, cover, clear }: { width: number; height: number; rest: { height: number; bottom: number; opacity: number }; cover: Animated.AnimatedInterpolation<number>; clear: Animated.AnimatedInterpolation<number> }) {
+  const drift = (i: number, dir: number) => {
+    const from = i * 0.12;
+    const to = Math.min(1, from + 0.6);
+    return {
+      opacity: clear.interpolate({ inputRange: [from, to], outputRange: [1, 0], extrapolate: 'clamp' }),
+      translateX: clear.interpolate({ inputRange: [from, to], outputRange: [0, dir * width * 0.8], extrapolate: 'clamp' }),
+    };
+  };
+  const base = drift(BANKS.length, 1);
+  return (
+    <>
+      {BANKS.map((b, i) => {
+        const d = drift(i, b.dir);
+        const art = width * CLOUD_ASPECT * 1.1;
+        const fill = height * (1 - b.top) - art + 40;
+        return (
+          <Animated.View
+            key={i}
+            style={{
+              position: 'absolute',
+              left: b.shift * width,
+              top: b.top * height,
+              width,
+              height: art + fill,
+              opacity: Animated.multiply(d.opacity, cover),
+              transform: [{ translateX: d.translateX }, { translateY: cover.interpolate({ inputRange: [0, 1], outputRange: [height * (0.7 - b.top), 0] }) }, { scaleX: b.flip ? -1 : 1 }],
+            }}
+          >
+            <CloudStrip width={width} height={art} fill={fill} />
+          </Animated.View>
+        );
+      })}
+      {/* The screen's own cloud frame, exactly where it draws it */}
+      <Animated.View style={{ position: 'absolute', left: 0, bottom: rest.bottom, width, height: rest.height, opacity: Animated.multiply(base.opacity, rest.opacity), transform: [{ translateX: base.translateX }] }}>
+        <CloudStrip width={width} height={rest.height} />
+      </Animated.View>
+    </>
+  );
+}
+
+function Crescent({ r }: { r: number }) {
+  return (
+    <Svg width={r * 2} height={r * 2}>
+      <Circle cx={r} cy={r} r={r} fill={night.window} opacity={0.08} />
+      <Path d={`M${r} ${r * 0.25} A${r * 0.75} ${r * 0.75} 0 1 0 ${r} ${r * 1.75} A${r * 0.55} ${r * 0.75} 0 1 1 ${r} ${r * 0.25} Z`} fill={night.window} transform={`rotate(-28 ${r} ${r})`} />
     </Svg>
   );
 }
@@ -299,7 +420,8 @@ function CloudBank({ width, height, color }: { width: number; height: number; co
  * Signing in. The bat leaves the moon, the clouds part, and it flies away from us into a much bigger city:
  *   0.00–0.06  the bat hangs from the tip of the crescent moon above the clouds.
  *   0.05–0.22  it drops off and swoops down toward the camera.
- *   0.16–0.38  the cloud bank splits down the middle and rolls aside, revealing a wide city far below.
+ *   0.06–0.22  login's clouds thicken to fill the view as we sink into them...
+ *   0.20–0.46  ...then clear, banks drifting off left and right, revealing a wide city far below.
  *   0.28–0.34  it turns, and we see it from behind as it heads down into the city...
  *   0.34–0.84  ...flying slowly away from us, shrinking into the distance, while the view eases in on the part of the
  *              city we're arriving in (0.60–0.84) and the sky becomes that screen's night.
@@ -314,7 +436,8 @@ function ArriveTrip({ p, trip, width, height }: { p: Animated.Value; trip: Extra
   const moon = { x: width / 2, y: height * 0.16, r: 54 };
   const tip = { x: moon.x + moon.r * 0.42, y: moon.y + moon.r * 0.72 };
   const swoop = { x: width / 2 - BAT / 2, y: height * 0.5 };
-  const cloudH = height * 0.42;
+  // As login.tsx draws them.
+  const loginClouds = { height: Math.min(height * 0.28, 270), bottom: -25, opacity: 0.9 };
   const wideW = width * 2.4;
   const wideH = height * 0.5;
   const zoomOut = width / wideW;
@@ -323,7 +446,7 @@ function ArriveTrip({ p, trip, width, height }: { p: Animated.Value; trip: Extra
     <View pointerEvents="none" style={StyleSheet.absoluteFill}>
       <Animated.View style={[StyleSheet.absoluteFill, { opacity: r([0.88, 1], [1, 0]) }]}>
         {/* The login sky, turning into the night of the screen we're arriving at */}
-        <LinearGradient colors={['#170033', '#2A1250', '#3A1763']} locations={[0, 0.6, 1]} style={StyleSheet.absoluteFill} />
+        <View style={[StyleSheet.absoluteFill, { backgroundColor: LOGIN_SKY }]} />
         <Animated.View style={[StyleSheet.absoluteFill, { opacity: r([0.3, 0.7], [0, 1]) }]}>
           <LinearGradient colors={to.sky} locations={[0, 0.6, 1]} style={StyleSheet.absoluteFill} />
         </Animated.View>
@@ -331,26 +454,18 @@ function ArriveTrip({ p, trip, width, height }: { p: Animated.Value; trip: Extra
 
         {/* The moon drifts up out of frame as we descend */}
         <Animated.View style={{ position: 'absolute', left: moon.x - moon.r, top: moon.y - moon.r, opacity: r([0.3, 0.5], [1, 0]), transform: [{ translateY: r([0.1, 0.5], [0, -height * 0.3]) }] }}>
-          <Svg width={moon.r * 2} height={moon.r * 2}>
-            <Circle cx={moon.r} cy={moon.r} r={moon.r} fill={night.window} opacity={0.08} />
-            <Path d={`M${moon.r} ${moon.r * 0.25} A${moon.r * 0.75} ${moon.r * 0.75} 0 1 0 ${moon.r} ${moon.r * 1.75} A${moon.r * 0.55} ${moon.r * 0.75} 0 1 1 ${moon.r} ${moon.r * 0.25} Z`} fill={night.window} transform={`rotate(-28 ${moon.r} ${moon.r})`} />
-          </Svg>
+          <Crescent r={moon.r} />
         </Animated.View>
 
         {/* A far bigger city than any one screen shows, seen from high above; then the view eases in on our part */}
-        <Animated.View style={{ position: 'absolute', left: (width - wideW) / 2, bottom: 0, width: wideW, height: wideH, transformOrigin: 'bottom', opacity: r([0.14, 0.24, 0.8, 0.86], [0, 1, 1, 0]), transform: [{ scale: r([0.18, 0.6, 0.84], [zoomOut * 0.9, zoomOut, 1]) }] }}>
+        <Animated.View style={{ position: 'absolute', left: (width - wideW) / 2, bottom: 0, width: wideW, height: wideH, transformOrigin: 'bottom', opacity: r([0.2, 0.3, 0.8, 0.86], [0, 1, 1, 0]), transform: [{ scale: r([0.18, 0.6, 0.84], [zoomOut * 0.9, zoomOut, 1]) }] }}>
           <NightCity width={wideW} height={wideH} animated={false} variant="hero" scene={to} />
         </Animated.View>
         {/* ...which hands over to the screen's own city exactly where it sits */}
-        <CityAt frame={frame} scene={trip.to} style={{ opacity: r([0.8, 0.86], [0, 1]) }} />
+        <CityAt frame={frame} scene={trip.to} bottom={height} style={{ opacity: r([0.8, 0.86], [0, 1]) }} />
 
-        {/* The clouds split down the middle and roll aside */}
-        <Animated.View style={{ position: 'absolute', left: 0, top: height * 0.4, opacity: r([0.3, 0.4], [1, 0]), transform: [{ translateX: r([0.16, 0.38], [0, -width * 0.75]) }] }}>
-          <CloudBank width={width * 0.62} height={cloudH} color="#5B3479" />
-        </Animated.View>
-        <Animated.View style={{ position: 'absolute', left: width * 0.38, top: height * 0.38, opacity: r([0.3, 0.4], [1, 0]), transform: [{ translateX: r([0.16, 0.38], [0, width * 0.75]) }, { scaleX: -1 }] }}>
-          <CloudBank width={width * 0.62} height={cloudH} color="#6B3E86" />
-        </Animated.View>
+        {/* Login's clouds thicken around us as we sink into them, then clear, drifting off both ways */}
+        <CloudCover width={width} height={height} rest={loginClouds} cover={r([0.06, 0.22], [0, 1])} clear={r([0.2, 0.46], [0, 1])} />
       </Animated.View>
 
       {/* Asleep on the moon's tip, for a breath */}
@@ -402,6 +517,77 @@ function ArriveTrip({ p, trip, width, height }: { p: Animated.Value; trip: Extra
 }
 
 /**
+ * Signing out: sign-in played backwards in spirit, though the bat flies forwards the whole way.
+ *   0.00–0.08  a full city eases in along the foot of the screen, the bat on its perch.
+ *   0.06–0.34  it lifts off and rises toward us as the camera climbs and the city sinks away (0.14–0.44).
+ *   0.20–0.50  the sky turns to the sign-in night, and banks of cloud drift in beneath us from both sides (0.24–0.50)...
+ *   0.50–0.74  ...then the higher ones sink away, leaving the welcome screen's cloud frame.
+ *   0.34–0.80  the bat climbs to the welcome screen's moon and settles on it as the logo comes in (0.74–0.84).
+ *   0.90–1.00  the overlay clears onto the welcome screen, which looks the same underneath.
+ */
+function LeaveTrip({ p, trip, width, height }: { p: Animated.Value; trip: Extract<Trip, { mode: 'leave' }>; width: number; height: number }) {
+  const from = scenes[trip.from];
+  // As with building trips, the screen's own city is mostly behind the tab bar, so the trip draws a full layered one
+  // along the foot of the screen for the bat to rise out of.
+  const frame = { ...defaultFrame(width, height), hero: true };
+  const perch = computedPerch(trip.from, frame);
+  const r = lerp(p);
+
+  // The welcome logo, once that screen has laid it out; until then, where it usually sits.
+  const size = Math.min(width * 0.74, height < 720 ? 220 : 280, height * 0.31);
+  const logo = moonFrame() ?? { x: (width - size) / 2, y: height * 0.3 - size / 2, width: size, height: size };
+  // The bat in the logo hangs right of centre under the moon's tip (as welcome.tsx lands its swoop).
+  const home = { x: logo.x + logo.width * 0.6, y: logo.y + logo.height * 0.42 };
+  const rise = { x: width / 2 - BAT / 2, y: height * 0.42 };
+  // As welcome.tsx draws them.
+  const welcomeClouds = { height: Math.min(height * 0.34, 330), bottom: 0, opacity: 1 };
+
+  return (
+    <View pointerEvents="none" style={StyleSheet.absoluteFill}>
+      <Animated.View style={[StyleSheet.absoluteFill, { opacity: r([0.9, 1], [1, 0]) }]}>
+        <LinearGradient colors={from.sky} locations={[0, 0.6, 1]} style={StyleSheet.absoluteFill} />
+        <Animated.View style={[StyleSheet.absoluteFill, { backgroundColor: LOGIN_SKY, opacity: r([0.2, 0.5], [0, 1]) }]} />
+        <Stars />
+
+        {/* The city we're leaving: back up after the goodbye, then sinking away below as we climb */}
+        <CityAt frame={frame} scene={trip.from} bottom={height} style={{ opacity: r([0, 0.08, 0.3, 0.44], [0, 1, 1, 0]), transform: [{ translateY: r([0, 0.08, 0.14, 0.44], [36, 0, 0, height * 0.35]) }] }} />
+
+        {/* Clouds drift in from both sides beneath us as we climb, then the higher banks sink away, leaving the
+            welcome screen's own frame */}
+        <CloudCover width={width} height={height} rest={welcomeClouds} cover={r([0.5, 0.74], [1, 0])} clear={r([0.24, 0.5], [1, 0])} />
+
+        {/* The welcome logo comes in as the bat settles onto the moon */}
+        <Animated.View style={{ position: 'absolute', left: logo.x, top: logo.y, width: logo.width, height: logo.height, opacity: r([0.74, 0.84], [0, 1]), transform: [{ scale: r([0.74, 0.86], [0.9, 1]) }] }}>
+          <Image source={LOGO} resizeMode="contain" style={{ width: logo.width, height: logo.height }} />
+        </Animated.View>
+      </Animated.View>
+
+      <Animated.View style={{ position: 'absolute', left: perch.x, top: perch.y, opacity: r([0, 0.07, 0.09], [1, 1, 0]) }}>
+        <HangingBat size={13} />
+      </Animated.View>
+
+      {/* Up out of the city toward us, then on up to the moon */}
+      <Animated.View
+        style={{
+          position: 'absolute',
+          left: 0,
+          top: 0,
+          opacity: r([0.06, 0.09, 0.78, 0.84], [0, 1, 1, 0]),
+          transform: [
+            { translateX: r([0.07, 0.34, 0.58, 0.8], [bx(perch), rise.x, (rise.x + home.x - BAT / 2) / 2 - width * 0.12, home.x - BAT / 2]) },
+            { translateY: r([0.07, 0.2, 0.34, 0.58, 0.8], [by(perch), (by(perch) + rise.y) / 2 - 40, rise.y, (rise.y + home.y) / 2 - 30, home.y - BAT * 0.3]) },
+            { scale: r([0.07, 0.34, 0.5, 0.8], [0.15, 1.3, 1.1, 0.42]) },
+            { rotate: r([0.07, 0.2, 0.34, 0.58, 0.8], ['8deg', '-6deg', '0deg', '-12deg', '0deg']) },
+          ],
+        }}
+      >
+        <FlyingBat size={BAT} flapMs={170} />
+      </Animated.View>
+    </View>
+  );
+}
+
+/**
  * Sits above every screen and plays a short trip whenever the route changes: a skyline crossing between tabs
  * (SkylineTrip), or going in and out of a building for pages opened from a tab (DoorTrip). If the next screen is
  * slow to load, the trip pauses mid-flight over open country (Landscape) until it's ready. Screens that share a scene
@@ -410,13 +596,16 @@ function ArriveTrip({ p, trip, width, height }: { p: Animated.Value; trip: Extra
 export function BatTransition() {
   const { width, height } = useWindowDimensions();
   const reduced = useReducedMotion();
+  // Subscribed so the trips' on/off switches (read through currentSettings) are loaded before the first navigation.
+  useSettings();
   const p = useRef(new Animated.Value(0)).current;
   const busy = useRef(false);
-  const last = useRef<{ path: string; scene: SceneName | null; interior: InteriorKind | null } | null>(null);
+  const last = useRef<Place | null>(null);
   const history = useRef<string[]>([]);
   const trips = useRef(0);
   const [trip, setTrip] = useState<Trip | null>(null);
-  const [waiting, setWaiting] = useState<LandscapeKind | null>(null);
+  // While the next screen loads mid-trip: the bat over open country, or (loading bat switched off) just the words.
+  const [waiting, setWaiting] = useState<LandscapeKind | 'plain' | null>(null);
   const waitFade = useRef(new Animated.Value(0)).current;
   // The destination screen records its city and perch a moment after it mounts; redraw when it does.
   const [, setTick] = useState(0);
@@ -460,7 +649,7 @@ export function BatTransition() {
     const checkpoint = () => {
       if (screenReadySince(startedAt)) return secondHalf();
       // Not ready yet: fly on over open country until it is (or until we've waited long enough).
-      setWaiting(trips.current % 2 ? 'forest' : 'road');
+      setWaiting(!allowed('loader') ? 'plain' : trips.current % 2 ? 'forest' : 'road');
       Animated.timing(waitFade, { toValue: 1, duration: 260, useNativeDriver: true }).start();
       const resume = () => {
         unsubscribe?.();
@@ -498,13 +687,15 @@ export function BatTransition() {
     startSwipe = (dest, go) => {
       const prev = last.current;
       const to = sceneForPath(dest);
-      if (!prev || prev.interior || !prev.scene || !to || to === prev.scene || busy.current || reduced || AUTH_ROUTES.has(prev.path)) return false;
+      if (!prev?.scene || !to || busy.current || tripKind(prev, dest) !== 'swipe' || !allowed('navigation')) return false;
       preHandled.current = dest;
       play({ mode: 'swipe', from: prev.scene, to, dir: directionOf(history.current, prev.path, dest), takeoff: batSpot() }, go);
       return true;
     };
+    tripTo = (dest) => (last.current && !busy.current ? tripKind(last.current, dest) : null);
     return () => {
       startSwipe = null;
+      tripTo = null;
     };
   });
 
@@ -534,15 +725,16 @@ export function BatTransition() {
     }
     const dir = prev ? directionOf(history.current, prev.path, pathname) : 1;
     if (!prev) history.current = [pathname];
-    if (!prev || reduced || busy.current) return;
+    if (!prev || busy.current) return;
+    const kind = tripKind(prev, pathname);
+    if (!kind || !allowed(MOTION_FOR[kind])) return;
 
     const takeoff = batSpot();
-    let next: Trip | null = null;
-    if (AUTH_ROUTES.has(prev.path) && outdoor) next = { mode: 'arrive', to: outdoor, dir: 1, takeoff: null };
-    else if (interior && !prev.interior && prev.scene) next = { mode: 'enter', city: prev.scene, interior, dir, takeoff };
-    else if (prev.interior && !interior && outdoor) next = { mode: 'exit', city: outdoor, interior: prev.interior, dir, takeoff: null };
-    else if (!interior && !prev.interior && prev.scene && scene && scene !== prev.scene) next = { mode: 'swipe', from: prev.scene, to: scene, dir, takeoff };
-    if (next) play(next);
+    if (kind === 'arrive' && outdoor) play({ mode: 'arrive', to: outdoor, dir: 1, takeoff: null });
+    else if (kind === 'leave' && prev.scene) play({ mode: 'leave', from: prev.scene, dir: 1, takeoff });
+    else if (kind === 'enter' && interior && prev.scene) play({ mode: 'enter', city: prev.scene, interior, dir, takeoff });
+    else if (kind === 'exit' && outdoor && prev.interior) play({ mode: 'exit', city: outdoor, interior: prev.interior, dir, takeoff: null });
+    else if (kind === 'swipe' && prev.scene && scene) play({ mode: 'swipe', from: prev.scene, to: scene, dir, takeoff });
     // `play` only reads refs and stable values.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pathname, reduced]);
@@ -550,10 +742,19 @@ export function BatTransition() {
   if (!trip) return null;
   return (
     <>
-      {trip.mode === 'swipe' ? <SkylineTrip p={p} trip={trip} width={width} height={height} /> : trip.mode === 'arrive' ? <ArriveTrip p={p} trip={trip} width={width} height={height} /> : <DoorTrip p={p} trip={trip} width={width} height={height} />}
+      {trip.mode === 'swipe' && <SkylineTrip p={p} trip={trip} width={width} height={height} />}
+      {trip.mode === 'arrive' && <ArriveTrip p={p} trip={trip} width={width} height={height} />}
+      {trip.mode === 'leave' && <LeaveTrip p={p} trip={trip} width={width} height={height} />}
+      {(trip.mode === 'enter' || trip.mode === 'exit') && <DoorTrip p={p} trip={trip} width={width} height={height} />}
       {waiting && (
         <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, { opacity: waitFade }]}>
-          <Landscape kind={waiting} scene={scenes[trip.mode === 'swipe' || trip.mode === 'arrive' ? trip.to : trip.city]} dir={trip.dir} />
+          {waiting === 'plain' ? (
+            <View style={[StyleSheet.absoluteFill, { alignItems: 'center', justifyContent: 'center' }]}>
+              <LoadingDots color={night.window} />
+            </View>
+          ) : (
+            <Landscape kind={waiting} scene={scenes[trip.mode === 'swipe' || trip.mode === 'arrive' ? trip.to : trip.mode === 'leave' ? trip.from : trip.city]} dir={trip.dir} />
+          )}
         </Animated.View>
       )}
     </>

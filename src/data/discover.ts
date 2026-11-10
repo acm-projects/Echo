@@ -40,10 +40,3 @@ export const RECOMMENDED = ["Alice's Adventures in Wonderland", 'Frankenstein', 
 
 export const booksInGenre = (genre: GenreId) => DISCOVER_BOOKS.filter((b) => b.genre === genre);
 export const genreOf = (id: GenreId) => GENRES.find((g) => g.id === id)!;
-
-// Sample activity so the section isn't empty; replace with lib/db/friends getFriendActivity once books are linked.
-export const FRIENDS_READING = [
-  { name: 'Reader A', initial: 'A', color: '#9C7BFF', book: DISCOVER_BOOKS[0] },
-  { name: 'Reader B', initial: 'B', color: '#7CF2B8', book: DISCOVER_BOOKS[13] },
-  { name: 'Reader C', initial: 'C', color: '#FF8FB1', book: DISCOVER_BOOKS[4] },
-];

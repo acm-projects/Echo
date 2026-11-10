@@ -27,7 +27,11 @@ const lighthouse = ({ width, height }: Geometry) => {
 const marquee = ({ width, height }: Geometry) => {
   const cx = landmarkX(width);
   const bodyH = height * 0.58;
-  return { cx, bodyH, signTop: height - bodyH + 14, sign: { w: 112, h: 30 } };
+  // The marquee hangs just under the roofline, clear of the low buildings in front; the blade stands on the roof
+  // above it, so the two never overlap.
+  const signTop = height - bodyH + 8;
+  const blade = { x: cx + 26, w: 14, h: 50, top: signTop - 8 - 50 };
+  return { cx, bodyH, signTop, sign: { w: 112, h: 30 }, blade };
 };
 const clocktower = ({ width, height }: Geometry) => {
   const cx = landmarkX(width);
@@ -177,10 +181,10 @@ function Marquee({ g, scene, animated }: { g: Geometry; scene: Scene; animated: 
       <Svg width={g.width} height={g.height} style={{ position: 'absolute', left: 0, top: 0 }}>
         <Rect x={m.cx - 44} y={g.height - m.bodyH} width={88} height={m.bodyH} fill={scene.mid} />
         {/* A tall blade sign up the front of the theatre */}
-        <Rect x={m.cx + 30} y={g.height - m.bodyH - 26} width={14} height={60} fill="#140C22" stroke={night.neonCyan} strokeWidth={1.2} />
+        <Rect x={m.blade.x} y={m.blade.top} width={m.blade.w} height={m.blade.h} fill="#140C22" stroke={night.neonCyan} strokeWidth={1.2} />
         <Rect x={left} y={m.signTop} width={m.sign.w} height={m.sign.h} fill="#140C22" stroke={night.neonPink} strokeWidth={1.5} />
       </Svg>
-      <View style={{ position: 'absolute', left: m.cx + 30, top: g.height - m.bodyH - 26, width: 14, height: 60, alignItems: 'center', justifyContent: 'space-evenly' }}>
+      <View style={{ position: 'absolute', left: m.blade.x, top: m.blade.top, width: m.blade.w, height: m.blade.h, alignItems: 'center', justifyContent: 'space-evenly' }}>
         {'ECHO'.split('').map((ch, i) => <Text key={i} style={{ fontFamily: fonts.sansBold, fontSize: 9, color: night.neonCyan, lineHeight: 11 }}>{ch}</Text>)}
       </View>
       <View style={{ position: 'absolute', left, top: m.signTop, width: m.sign.w, height: m.sign.h, alignItems: 'center', justifyContent: 'center' }}>

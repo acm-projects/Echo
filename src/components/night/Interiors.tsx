@@ -3,7 +3,7 @@ import { Animated, Easing, StyleSheet, Text, View, useWindowDimensions } from 'r
 import { LinearGradient } from 'expo-linear-gradient';
 import Svg, { Circle, Path, Rect } from 'react-native-svg';
 import { fonts, night } from '../../../theme';
-import { useReducedMotion } from './NightSky';
+import { useMotion } from './NightSky';
 
 // The rooms inside the city's buildings. Pages opened from a tab are "inside" somewhere: the bat flies in through a
 // door (see BatTransition) and the page sits on one of these backgrounds instead of the open night sky.
@@ -184,7 +184,7 @@ function Studio({ width, height, run }: { width: number; height: number; run: bo
 /** Full-bleed room background for pages that live "inside" a building. */
 export function Interior({ kind }: { kind: InteriorKind }) {
   const { width, height } = useWindowDimensions();
-  const run = !useReducedMotion();
+  const run = useMotion('background');
   const props = { width, height, run };
   return (
     <View pointerEvents="none" style={StyleSheet.absoluteFill}>

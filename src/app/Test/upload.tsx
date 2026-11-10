@@ -1,4 +1,4 @@
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as DocumentPicker from 'expo-document-picker';
 import { useCallback, useState } from 'react';
@@ -7,11 +7,23 @@ import { router, useFocusEffect } from 'expo-router';
 import { Screen } from '../../components/Screen';
 import { colors, fonts, type } from '../../../theme';
 import { getNarrators } from '../../data/narrators';
-import { processBook } from '../../data/bookJobs';
+import { processBook, type BookJob } from '../../data/bookJobs';
 import { notify } from '../../../lib/notify';
+import { notifyChapterReady } from '../../data/notifications';
 import { Sheet } from '../../components/Sheet';
 import { ClassicSheet } from '../../components/ClassicSheet';
 import { CLASSICS, useSavedClassics, type Classic } from '../../data/catalog';
+import { useSettings } from '../../data/settings';
+
+// Same title the server gives the book: the file name without its extension.
+const bookTitle = (fileName: string) => fileName.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ').trim();
+
+function readyLabel(job: BookJob) {
+  const chapters = job.chapters ?? [];
+  const ready = chapters.filter((chapter) => chapter.status === 'ready').length;
+  if (chapters.length <= 1) return 'Your audiobook is ready to play';
+  return job.status === 'processing' ? `${ready} of ${chapters.length} chapters ready. The rest keep narrating.` : `${ready} of ${chapters.length} chapters ready`;
+}
 
 // The first few classics; See All opens the full catalog.
 const PUBLIC_DOMAIN_BOOKS = CLASSICS.slice(0, 4);
@@ -20,16 +32,23 @@ export default function Upload() {
   const [processing, setProcessing] = useState(false);
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const [stage, setStage] = useState<string | null>(null);
+  // The job being narrated, kept so a finished chapter can be opened while the rest of the book is made.
+  const [job, setJob] = useState<BookJob | null>(null);
   const [narratorName, setNarratorName] = useState<string | null>(null);
   const [helpOpen, setHelpOpen] = useState(false);
   const [openBook, setOpenBook] = useState<Classic | null>(null);
   const [saved, toggleSaved] = useSavedClassics();
+  const [settings, update] = useSettings();
 
   useFocusEffect(useCallback(() => {
     getNarrators()
       .then((state) => setNarratorName(state.voices.find((voice) => voice.id === state.selectedId)?.name ?? null))
       .catch(() => setNarratorName(null));
   }, []));
+
+  const openJob = (current: BookJob) => {
+    router.push({ pathname: '/Test/book_details', params: { id: current.jobId, title: selectedFile ? bookTitle(selectedFile) : 'Your book', author: 'Uploaded by you' } });
+  };
 
   const selectAndProcess = async () => {
     const result = await DocumentPicker.getDocumentAsync({
@@ -41,9 +60,20 @@ export default function Upload() {
     setSelectedFile(file.name);
     setProcessing(true);
     setStage('Uploading');
+    setJob(null);
     try {
-      const job = await processBook(file, setStage);
-      notify('Book processed', `${job.result?.roster?.length ?? 0} voices found. IndexTTS generated the segment audio.`);
+      const finished = await processBook(file, (update) => {
+        setStage(update.stage);
+        setJob(update);
+        // Only a multi-chapter book gets a note per chapter; a one-chapter book ends with the "Book ready" alert.
+        const chapters = update.chapters ?? [];
+        if (chapters.length > 1) for (const chapter of chapters) if (chapter.status === 'ready') void notifyChapterReady(update.jobId, chapter.index, bookTitle(file.name), chapter.title);
+      }, { characterVoices: settings.characterVoices });
+      const chapters = finished.chapters ?? [];
+      const voices = finished.result?.roster?.characters.length ?? 0;
+      const summary = chapters.length > 1 ? `${chapters.filter((c) => c.status === 'ready').length} of ${chapters.length} chapters narrated` : 'Narration finished';
+      const reader = settings.characterVoices ? `with ${voices} voices` : 'by your narrator';
+      notify('Book ready', `${summary} ${reader}.${finished.error ? ` ${finished.error}` : ''}`);
     } catch (error) {
       notify('Upload failed', error instanceof Error ? error.message : 'Could not process this file.');
     } finally {
@@ -100,6 +130,21 @@ export default function Upload() {
           </Text>
         </Pressable>
 
+        {job && (job.chapters ?? []).some((chapter) => chapter.status === 'ready') && (
+          <Pressable style={s.narratorCard} onPress={() => openJob(job)} accessibilityRole="button">
+            <View style={s.narratorIcon}>
+              <Ionicons name="headset-outline" size={22} color={colors.pink} />
+            </View>
+            <View style={s.narratorInfo}>
+              <Text style={s.narratorTitle}>{job.status === 'processing' ? 'Listen now' : 'Open your audiobook'}</Text>
+              <Text style={s.narratorSubtitle} numberOfLines={2}>
+                {readyLabel(job)}
+              </Text>
+            </View>
+            <Ionicons name="chevron-forward" size={20} color={colors.faint} />
+          </Pressable>
+        )}
+
         <Pressable style={s.narratorCard} onPress={() => router.push('/narrator-voices')}>
           <View style={s.narratorIcon}>
             <Ionicons name="mic-outline" size={22} color={colors.pink} />
@@ -112,6 +157,25 @@ export default function Upload() {
           </View>
           <Ionicons name="chevron-forward" size={20} color={colors.faint} />
         </Pressable>
+
+        <View style={s.narratorCard}>
+          <View style={s.narratorIcon}>
+            <Ionicons name="pulse-outline" size={22} color={colors.pink} />
+          </View>
+          <View style={s.narratorInfo}>
+            <Text style={s.narratorTitle}>Character Voices</Text>
+            <Text style={s.narratorSubtitle} numberOfLines={2}>
+              {settings.characterVoices ? 'A different voice for each character' : 'The whole book in your narrator\u2019s voice'}
+            </Text>
+          </View>
+          <Switch
+            value={settings.characterVoices}
+            onValueChange={(v) => update('characterVoices', v)}
+            trackColor={{ false: 'rgba(255,255,255,0.15)', true: colors.pink }}
+            thumbColor="#fff"
+            accessibilityLabel="A different voice for each character"
+          />
+        </View>
 
         <View style={s.sectionHeader}>
           <View>
@@ -198,7 +262,7 @@ export default function Upload() {
           {[
             ['document-text-outline', 'PDF, EPUB, TXT or Markdown, up to 50 MB. The file needs real text; scanned page images can’t be read yet.'],
             ['people-outline', 'Echo reads the book, finds every character, and gives each one their own voice.'],
-            ['time-outline', 'Short stories take a few minutes. You can leave this screen; we’ll keep working.'],
+            ['time-outline', 'Books with chapters are narrated one chapter at a time, so you can start listening as soon as the first is ready. You can leave this screen; we’ll keep working.'],
             ['mic-outline', 'Your chosen narrator reads everything that isn’t dialogue.'],
           ].map(([icon, text]) => (
             <View key={icon} style={{ flexDirection: 'row', gap: 12 }}>

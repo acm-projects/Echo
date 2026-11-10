@@ -3,7 +3,7 @@ import { Animated, Easing, StyleSheet, View } from 'react-native';
 import { useIsFocused } from 'expo-router';
 import { scenes, type Scene, type SceneName } from '../../../theme';
 import { FlyingBat, HangingBat } from './Bat';
-import { useReducedMotion } from './NightSky';
+import { useMotion } from './NightSky';
 import { cityFor, isTraveling, onPerchesChange, setBatSpot } from './perchRegistry';
 import type { CitySpot } from './NightCity';
 
@@ -21,7 +21,7 @@ const nameOf = (scene: Scene) => (Object.keys(scenes) as SceneName[]).find((k) =
  */
 export function CityBat({ scene, spots, shift }: { scene: Scene; spots: CitySpot[]; shift: Record<CitySpot['layer'], Animated.AnimatedInterpolation<number> | number> }) {
   const focused = useIsFocused();
-  const reduced = useReducedMotion();
+  const reduced = !useMotion('background');
   const [, setTick] = useState(0);
   const [at, setAt] = useState(0);
   const [flight, setFlight] = useState<{ from: number; to: number } | null>(null);

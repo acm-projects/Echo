@@ -1,10 +1,10 @@
 import { ReactNode, useEffect, useRef } from 'react';
 import { Animated, Easing, type StyleProp, type ViewStyle } from 'react-native';
-import { useReducedMotion } from './night/NightSky';
+import { useMotion } from './night/NightSky';
 
 /** Fades and lifts its children into place. Give siblings increasing `index` values for a staggered cascade. */
 export function Reveal({ children, index = 0, style }: { children: ReactNode; index?: number; style?: StyleProp<ViewStyle> }) {
-  const reduced = useReducedMotion();
+  const reduced = !useMotion('details');
   const t = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {

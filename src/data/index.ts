@@ -23,6 +23,17 @@ import {
   mockCommunityBooks,
   mockReviewsComments,
 } from '../mock/community';
+import {
+  supabaseBook,
+  supabaseBookProgress,
+  supabaseChapters,
+  supabaseCharacters,
+  supabaseCommunityBooks,
+  supabaseCommunityReviews,
+  supabaseMyBooks,
+  supabaseMyProgress,
+  supabaseMyStreak,
+} from './supabaseRows';
 
 // Handles loading, empty, and error scenarios
 async function loadMockData<T>(data: T): Promise<T> {
@@ -48,6 +59,16 @@ function mockArray<T>(items: T[]): T[] {
   return dataConfig.scenario === 'empty' ? [] : items;
 }
 
+// Test data first, then the signed-in user's real rows from Supabase. Scenarios only change the test data,
+// and with mock data switched off only the real rows are returned.
+async function withSupabase<T>(mock: T[], real: Promise<T[]>): Promise<T[]> {
+  const [testItems, realItems] = await Promise.all([
+    dataConfig.useMockData ? loadMockData(mockArray(mock)) : Promise.resolve([]),
+    real,
+  ]);
+  return [...testItems, ...realItems];
+}
+
 // Current user's profile
 export async function getMyProfile(): Promise<User | null> {
   const user = mockUsers.find(
@@ -67,7 +88,7 @@ export async function getMyBooks(): Promise<Book[]> {
       book.deleted_at === null
   );
 
-  return loadMockData(mockArray(books));
+  return withSupabase(books, supabaseMyBooks());
 }
 
 // Find one book by ID
@@ -78,9 +99,15 @@ export async function getBook(
     (item) => item.id === bookId && item.deleted_at === null
   );
 
-  return loadMockData(
-    dataConfig.scenario === 'empty' ? null : book ?? null
-  );
+  // Real book ids aren't in the test data, so those are looked up in Supabase.
+  if (!book) {
+    const real = await supabaseBook(bookId);
+    return real ?? (dataConfig.useMockData ? loadMockData(null) : null);
+  }
+
+  return dataConfig.useMockData
+    ? loadMockData(dataConfig.scenario === 'empty' ? null : book)
+    : null;
 }
 
 // Get chapters for a book in reading order
@@ -91,7 +118,7 @@ export async function getBookChapters(
     .filter((chapter) => chapter.book_id === bookId)
     .sort((a, b) => a.chapter_index - b.chapter_index);
 
-  return loadMockData(mockArray(chapters));
+  return withSupabase(chapters, supabaseChapters(bookId));
 }
 
 // Get characters belonging to a book
@@ -102,7 +129,7 @@ export async function getBookCharacters(
     (character) => character.book_id === bookId
   );
 
-  return loadMockData(mockArray(characters));
+  return withSupabase(characters, supabaseCharacters(bookId));
 }
 
 // Get the current user's progress for one book
@@ -115,9 +142,15 @@ export async function getBookProgress(
       item.book_id === bookId
   );
 
-  return loadMockData(
-    dataConfig.scenario === 'empty' ? null : progress ?? null
-  );
+  // Real books have no test progress, so theirs comes from Supabase.
+  if (!progress) {
+    const real = await supabaseBookProgress(bookId);
+    return real ?? (dataConfig.useMockData ? loadMockData(null) : null);
+  }
+
+  return dataConfig.useMockData
+    ? loadMockData(dataConfig.scenario === 'empty' ? null : progress)
+    : null;
 }
 
 // Get all listening progress for the current user
@@ -126,11 +159,14 @@ export async function getMyProgress(): Promise<UserProgress[]> {
     (item) => item.user_id === USER_IDS.current
   );
 
-  return loadMockData(mockArray(progress));
+  return withSupabase(progress, supabaseMyProgress());
 }
 
-// Get current user's listening streak
+// Get current user's listening streak: the signed-in reader's real streak, else the test one.
 export async function getMyStreak(): Promise<UserStreak | null> {
+  const real = await supabaseMyStreak();
+  if (real) return real;
+
   const streak = mockStreaks.find(
     (item) => item.user_id === USER_IDS.current
   );
@@ -157,7 +193,7 @@ export async function getCommunityBooks(): Promise<CommunityBook[]> {
     (book) => book.status === 'published'
   );
 
-  return loadMockData(mockArray(books));
+  return withSupabase(books, supabaseCommunityBooks());
 }
 
 // Alias for screens that call community items posts
@@ -175,5 +211,5 @@ export async function getCommunityReviews(
       review.deleted_at === null
   );
 
-  return loadMockData(mockArray(reviews));
+  return withSupabase(reviews, supabaseCommunityReviews(communityBookId));
 }

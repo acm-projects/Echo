@@ -38,7 +38,8 @@ function skyline(width: number, height: number, seed: number, minH: number, maxH
     const feature = roof === 'spire' ? 18 + rand() * 20 : roof === 'setback' || roof === 'crown' ? 8 + rand() * 14 : roof === 'pitched' ? w * 0.38 : roof === 'dome' ? w * 0.3 : roof === 'slant' ? 6 + rand() * 12 : 10;
     // Keep the whole silhouette, roof included, inside the layer.
     const quiet = quietX !== null && x < quietX + LANDMARK_CLEARANCE && x + w > quietX - LANDMARK_CLEARANCE;
-    const h = Math.min(minH + Math.floor(rand() * (maxH - minH)), height - feature - 2, quiet ? height * 0.3 : Infinity);
+    // Around the landmark the whole silhouette, roof feature included, stays under 30% of the layer.
+    const h = Math.max(4, Math.min(minH + Math.floor(rand() * (maxH - minH)), height - feature - 2, quiet ? height * 0.3 - feature : Infinity));
     // Most buildings use the scene's main light; a few glow in its second colour or in neon.
     const roll = rand();
     const tint = roll < neonChance ? (rand() < 0.5 ? night.neonCyan : night.neonPink) : roll < 0.35 ? palette[1] ?? palette[0] : palette[0];
