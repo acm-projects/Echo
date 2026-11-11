@@ -69,6 +69,3 @@ coverage/
 # Narration worker lock (one IndexTTS worker per machine)
 /workers/indextts/.worker.lock
 
-
-#fonts!!
-assets/fonts/MoonveilStellarion-PersonalUse.ttf
