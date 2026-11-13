@@ -1,6 +1,7 @@
 import type { DocumentPickerAsset } from 'expo-document-picker';
 
 import { VOICE_SERVER_URL, voiceServerHeaders } from './voiceServer';
+import type { CastMember } from './narrators';
 
 export type BookJobChapter = { index: number; title: string; status: 'queued' | 'processing' | 'ready' | 'failed'; durationMs?: number; error?: string };
 
@@ -10,6 +11,9 @@ export type BookJob = {
   status: 'processing' | 'done' | 'error';
   stage: string;
   chapters?: BookJobChapter[];
+  // The voices are made and narration waits for the reader to approve the cast (see narrators.ts setBookCast).
+  awaitingCast?: boolean;
+  cast?: CastMember[];
   result?: { roster?: { characters: Array<{ name: string }> } };
   // On a finished job, notes chapters that couldn't be narrated.
   error?: string;
@@ -56,6 +60,9 @@ async function bookAction<T>(method: 'POST' | 'DELETE', path: string, body?: unk
   const headers = { ...(await voiceServerHeaders()), ...(body ? { 'content-type': 'application/json' } : {}) };
   return readJson<T>(await fetch(`${VOICE_SERVER_URL}${path}`, { method, headers, body: body ? JSON.stringify(body) : undefined }));
 }
+
+/** A job's current state, for a book opened from the shelf while it's still being made. */
+export const getBookJob = async (bookId: string) => readJson<BookJob>(await fetch(`${VOICE_SERVER_URL}/api/books/jobs/${bookId}`, { headers: await voiceServerHeaders() }));
 
 /** Removes a book the reader made: its audio and files on the server, and the book from their library. */
 export const removeBook = (bookId: string) => bookAction<{ removed: boolean }>('DELETE', `/api/books/${bookId}`);

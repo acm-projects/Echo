@@ -61,6 +61,12 @@ export async function setBookSource(book: { id: string; userId: string; title: s
   }));
 }
 
+/** Waiting for the reader to approve the cast: not processing, so no server's stale sweep touches it. */
+export async function setBookQueued(bookId: string) {
+  if (!db) return;
+  await run('setBookQueued', db.from('books').update({ status: 'queued', processing_error: null }).eq('id', bookId));
+}
+
 /** Back to processing for a retry, a resume after a restart, or a new narrator. */
 export async function setBookProcessing(bookId: string) {
   if (!db) return;
@@ -148,6 +154,12 @@ export async function setNarratorSample(bookId: string, sample: { voiceId?: stri
   await run('setNarratorSample', db.from('characters').update({ voice_id: sample.voiceId ?? null, voice_sample_path: sample.path }).eq('book_id', bookId).eq('is_narrator', true));
 }
 
+/** The voice a character is read with, after the reader swaps it in the cast review. */
+export async function setCharacterVoice(bookId: string, name: string, voice: { voiceId?: string; samplePath?: string; voiceName?: string }) {
+  if (!db) return;
+  await run('setCharacterVoice', db.from('characters').update({ voice_id: voice.voiceId ?? null, voice_sample_path: voice.samplePath ?? null, voice_name: voice.voiceName ?? null }).eq('book_id', bookId).eq('name', name));
+}
+
 // ---- chapters --------------------------------------------------------------------------------------------------
 
 /** Lists every chapter as queued before narration starts, so the app can show the whole book while it's made. */
@@ -205,6 +217,25 @@ export async function setSelectedNarrator(userId: string, voiceId: string) {
   // Cleared first: the one-selected-per-user index would reject two selected rows mid-update.
   await run('setSelectedNarrator clear', db.from('narrator_voices').update({ is_selected: false }).eq('user_id', userId).eq('is_selected', true));
   await run('setSelectedNarrator', db.from('narrator_voices').update({ is_selected: true }).eq('user_id', userId).eq('voice_id', voiceId));
+}
+
+export async function deleteNarratorVoice(voiceId: string) {
+  if (!db) return;
+  await run('deleteNarratorVoice', db.from('narrator_voices').delete().eq('voice_id', voiceId));
+}
+
+export type VoiceUse = { voiceId: string; bookId: string; title: string; character: string };
+
+/** Where a user's voices are in use: every cast row of their books that points at one of their voice ids. */
+export async function getVoiceUsage(userId: string, voiceIds: string[]): Promise<VoiceUse[]> {
+  if (!db || !voiceIds.length) return [];
+  const rows = await run('getVoiceUsage', db.from('characters')
+    .select('name, voice_id, books!characters_book_id_fkey!inner(id, title, user_id, deleted_at)')
+    .in('voice_id', voiceIds)
+    .eq('books.user_id', userId)
+    .is('books.deleted_at', null));
+  return ((rows ?? []) as unknown as Array<{ name: string; voice_id: string; books: { id: string; title: string } }>)
+    .map((row) => ({ voiceId: row.voice_id, bookId: row.books.id, title: row.books.title, character: row.name }));
 }
 
 /** A user's narrator rows, for picking up voices another machine's server created. */

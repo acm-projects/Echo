@@ -103,6 +103,33 @@ export async function localCopy(key: string) {
   }
 }
 
+/** Stores bytes and keeps them as the local copy, so a file the server just made isn't downloaded again to use it. */
+export async function putBytesKeepingLocal(key: string, body: Buffer) {
+  await putBytes(key, body);
+  if (!s3) return localPath(key);
+  const target = cachePath(key);
+  await mkdir(path.dirname(target), { recursive: true });
+  await writeFile(target, body);
+  return target;
+}
+
+/**
+ * Removes local copies of stored objects once nothing needs them: each key given, and everything under each folder
+ * prefix (ending in /). The objects themselves stay in S3. Without a bucket the "copy" is the only file, so nothing is
+ * removed.
+ */
+export async function dropLocalCopies(keys: string[]) {
+  if (!s3) return;
+  await Promise.all(keys.map((key) => rm(cachePath(key.replace(/\/$/, '')), { recursive: true, force: true }).catch(() => {})));
+}
+
+/** Empties the whole local copy cache (at startup: anything there is a leftover, and S3 has it). */
+export async function clearLocalCopies() {
+  if (!s3) return;
+  await rm(cacheRoot, { recursive: true, force: true });
+  await mkdir(cacheRoot, { recursive: true });
+}
+
 /** Where a player should fetch the object: a signed S3 link, or the local file for the server to stream. */
 export async function playbackSource(key: string): Promise<{ url: string } | { filePath: string } | undefined> {
   if (!s3) return stat(localPath(key)).then(() => ({ filePath: localPath(key) }), () => undefined);

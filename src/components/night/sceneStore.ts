@@ -31,7 +31,7 @@ const ROUTE_INTERIORS: Record<string, InteriorKind> = {
   '/Test/animation-settings': 'radioroom',
   '/Test/help': 'radioroom',
   '/Test/downloads': 'radioroom',
-  '/narrator-voices': 'studio',
+  '/voice-studio': 'studio',
   '/Test/voice-lab': 'studio',
   '/voice-playground': 'studio',
 };

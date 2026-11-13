@@ -1,16 +1,18 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { LayoutAnimation, Pressable, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
-import { router, useLocalSearchParams } from 'expo-router';
+import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { Screen } from '../../components/Screen';
 import { Sheet, SheetItem } from '../../components/Sheet';
+import { CastSheet } from '../../components/CastSheet';
 import { Reveal } from '../../components/Reveal';
 import { DoodleUnderline } from '../../components/Doodle';
 import { colors, fonts, type } from '../../../theme';
 import { getBook, getBookChapters, getBookCharacters, getBookProgress } from '../../data';
 import type { Book, Chapter, Character, UserProgress } from '../../data/types';
 import { playback, type QueuedChapter } from '../../data/playback';
-import { removeBook, renarrateBook, retryBook } from '../../data/bookJobs';
+import { getBookJob, removeBook, renarrateBook, retryBook } from '../../data/bookJobs';
+import { getBookCast, type CastMember } from '../../data/narrators';
 import { markChaptersSeen, notifyChapterReady } from '../../data/notifications';
 import { notify } from '../../../lib/notify';
 import { mockBooks } from '../../mock/books';
@@ -72,11 +74,23 @@ export default function BookDetailsScreen() {
   const [record, setRecord] = useState<UserProgress | null>(null);
   const [confirmRemove, setConfirmRemove] = useState(false);
   const [busy, setBusy] = useState(false);
+  // The book's cast with its voices: shown for approval before narration starts, and for changes afterwards.
+  const [castSheet, setCastSheet] = useState<{ mode: 'review' | 'edit'; cast: CastMember[] } | null>(null);
+  const [awaitingCast, setAwaitingCast] = useState<CastMember[] | null>(null);
+  const reopenCast = useRef(false);
 
   const load = useCallback(() => {
     if (!params.id) return;
     const id = params.id;
-    getBook(id).then(setBook, () => {});
+    getBook(id).then((next) => {
+      setBook(next);
+      // A book that isn't narrated yet may be waiting on its cast.
+      if (next && ['uploaded', 'queued', 'processing'].includes(next.status)) {
+        getBookJob(id).then((job) => setAwaitingCast(job.awaitingCast ? job.cast ?? [] : null), () => setAwaitingCast(null));
+      } else {
+        setAwaitingCast(null);
+      }
+    }, () => {});
     getBookProgress(id).then(setRecord, () => {});
     getBookCharacters(id).then(setCast, () => {});
     getBookChapters(id).then((next) => {
@@ -92,6 +106,25 @@ export default function BookDetailsScreen() {
     }, () => {});
   }, [params.id, title]);
   useEffect(load, [load]);
+  // Back from the Voice Studio: the cast sheet opens again with the new voice listed.
+  useFocusEffect(useCallback(() => {
+    if (!reopenCast.current) return;
+    reopenCast.current = false;
+    load();
+    if (awaitingCast) setCastSheet({ mode: 'review', cast: awaitingCast });
+    else if (params.id) getBookCast(params.id).then((result) => setCastSheet({ mode: 'edit', cast: result.cast })).catch(() => {});
+  }, [awaitingCast, load, params.id]));
+
+  const openStudio = () => {
+    reopenCast.current = true;
+    setCastSheet(null);
+    router.push('/voice-studio');
+  };
+
+  const changeVoices = () => act('Couldn\u2019t open the cast', async () => {
+    const result = await getBookCast(params.id!);
+    setCastSheet({ mode: result.awaitingCast ? 'review' : 'edit', cast: result.cast });
+  }, () => {});
 
   const preparing = book !== null && ['uploaded', 'queued', 'processing'].includes(book.status);
   const stillNarrating = preparing || chapters.some((c) => c.status === 'queued' || c.status === 'processing');
@@ -197,17 +230,27 @@ export default function BookDetailsScreen() {
             <Text style={[s.percent, { color: cover[1] }]}>{Math.round(progress)}%</Text>
           </View>
           <View style={s.track}><View style={[s.fill, { width: `${progress}%`, backgroundColor: cover[1] }]} /></View>
-          <Pressable style={[s.continue, { backgroundColor: cover[1] }, !current && s.disabled]} onPress={() => play(current, resumeAtSec)} disabled={!current} accessibilityRole="button">
-            <Ionicons name={current ? 'play' : 'hourglass-outline'} size={18} color="#18131E" />
-            <Text style={s.continueText}>{!current ? 'Narrating the first chapter\u2026' : progress > 0 ? 'Continue listening' : 'Start listening'}</Text>
-          </Pressable>
+          {awaitingCast ? (
+            <>
+              <Pressable style={[s.continue, { backgroundColor: colors.gold }]} onPress={() => setCastSheet({ mode: 'review', cast: awaitingCast })} accessibilityRole="button">
+                <Ionicons name="people" size={18} color="#18131E" />
+                <Text style={s.continueText}>Meet the cast</Text>
+              </Pressable>
+              <Text style={type.meta}>The voices are ready. Narration starts once you\u2019ve approved the cast.</Text>
+            </>
+          ) : (
+            <Pressable style={[s.continue, { backgroundColor: cover[1] }, !current && s.disabled]} onPress={() => play(current, resumeAtSec)} disabled={!current} accessibilityRole="button">
+              <Ionicons name={current ? 'play' : 'hourglass-outline'} size={18} color="#18131E" />
+              <Text style={s.continueText}>{!current ? 'Narrating the first chapter\u2026' : progress > 0 ? 'Continue listening' : 'Start listening'}</Text>
+            </Pressable>
+          )}
           {failedCount > 0 && !stillNarrating && params.id && (
             <Pressable style={s.retry} onPress={() => act('Couldn\u2019t retry', () => retryBook(params.id!))} disabled={busy} accessibilityRole="button">
               <Ionicons name="refresh" size={16} color={colors.text} />
               <Text style={s.retryText}>{busy ? 'Starting\u2026' : `Retry ${failedCount === 1 ? 'the failed chapter' : `${failedCount} failed chapters`}`}</Text>
             </Pressable>
           )}
-          {stillNarrating && current && (
+          {stillNarrating && !awaitingCast && current && (
             <Text style={type.meta}>{ready.length} of {chapterList.length} chapters ready{narratingNow ? ` \u00b7 narrating ${narratingNow.title}` : ''}. New chapters appear here as they finish.</Text>
           )}
         </Reveal>
@@ -278,7 +321,10 @@ export default function BookDetailsScreen() {
 
       <Sheet visible={menu} onClose={() => setMenu(false)} title={title}>
         <SheetItem icon="play-skip-back-outline" label="Play from the beginning" onPress={() => { setMenu(false); play(ready[0]); }} />
-        <SheetItem icon="mic-outline" label="Change narrator" detail="Pick who reads your books" onPress={() => { setMenu(false); router.push('/narrator-voices'); }} />
+        <SheetItem icon="mic-outline" label="Voice Studio" detail="Design or record voices" onPress={() => { setMenu(false); router.push('/voice-studio'); }} />
+        {ownBook && params.id && !narratorOnly && (awaitingCast || !stillNarrating) && (
+          <SheetItem icon="people-outline" label={awaitingCast ? 'Meet the cast' : 'Change the voices'} detail={awaitingCast ? 'Approve the voices' : 'Any part, any voice'} onPress={changeVoices} />
+        )}
         {ownBook && params.id && !stillNarrating && (
           <SheetItem icon="sync-outline" label="Re-narrate with my narrator" detail="Reads every chapter again" onPress={() => act('Couldn\u2019t re-narrate', () => renarrateBook(params.id!))} />
         )}
@@ -291,6 +337,19 @@ export default function BookDetailsScreen() {
         <SheetItem icon="trash-outline" label="Remove for good" danger onPress={() => params.id && act('Couldn\u2019t remove the book', () => removeBook(params.id!), () => (router.canGoBack() ? router.back() : router.replace('/Test/library')))} />
         <SheetItem icon="close-outline" label="Keep it" onPress={() => setConfirmRemove(false)} />
       </Sheet>
+
+      {params.id && castSheet && (
+        <CastSheet
+          visible
+          bookId={params.id}
+          title={title}
+          cast={castSheet.cast}
+          mode={castSheet.mode}
+          onClose={() => setCastSheet(null)}
+          onDone={() => { setCastSheet(null); setAwaitingCast(null); load(); }}
+          onOpenStudio={openStudio}
+        />
+      )}
 
       <Sheet visible={person !== null} onClose={() => setPerson(null)}>
         {person && (

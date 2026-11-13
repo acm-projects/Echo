@@ -1,7 +1,7 @@
 import { Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as DocumentPicker from 'expo-document-picker';
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { router, useFocusEffect } from 'expo-router';
 
 import { Screen } from '../../components/Screen';
@@ -12,6 +12,7 @@ import { notify } from '../../../lib/notify';
 import { notifyChapterReady } from '../../data/notifications';
 import { Sheet } from '../../components/Sheet';
 import { ClassicSheet } from '../../components/ClassicSheet';
+import { CastSheet } from '../../components/CastSheet';
 import { CLASSICS, useSavedClassics, type Classic } from '../../data/catalog';
 import { useSettings } from '../../data/settings';
 
@@ -39,12 +40,27 @@ export default function Upload() {
   const [openBook, setOpenBook] = useState<Classic | null>(null);
   const [saved, toggleSaved] = useSavedClassics();
   const [settings, update] = useSettings();
+  // The cast review opens once per book when its voices are ready, and again when the reader comes back from the
+  // Voice Studio to use a voice they just made.
+  const [castOpen, setCastOpen] = useState(false);
+  const reviewedJob = useRef<string | null>(null);
+  const reopenCast = useRef(false);
 
   useFocusEffect(useCallback(() => {
     getNarrators()
       .then((state) => setNarratorName(state.voices.find((voice) => voice.id === state.selectedId)?.name ?? null))
       .catch(() => setNarratorName(null));
+    if (reopenCast.current) {
+      reopenCast.current = false;
+      setCastOpen(true);
+    }
   }, []));
+
+  const openStudio = () => {
+    reopenCast.current = true;
+    setCastOpen(false);
+    router.push('/voice-studio');
+  };
 
   const openJob = (current: BookJob) => {
     router.push({ pathname: '/Test/book_details', params: { id: current.jobId, title: selectedFile ? bookTitle(selectedFile) : 'Your book', author: 'Uploaded by you' } });
@@ -65,6 +81,10 @@ export default function Upload() {
       const finished = await processBook(file, (update) => {
         setStage(update.stage);
         setJob(update);
+        if (update.awaitingCast && reviewedJob.current !== update.jobId) {
+          reviewedJob.current = update.jobId;
+          setCastOpen(true);
+        }
         // Only a multi-chapter book gets a note per chapter; a one-chapter book ends with the "Book ready" alert.
         const chapters = update.chapters ?? [];
         if (chapters.length > 1) for (const chapter of chapters) if (chapter.status === 'ready') void notifyChapterReady(update.jobId, chapter.index, bookTitle(file.name), chapter.title);
@@ -122,13 +142,26 @@ export default function Upload() {
           </Text>
 
           <Text style={s.uploadDescription}>
-            {processing ? `${stage ?? 'Processing'}...` : 'Add a book from your device'}
+            {processing ? (job?.awaitingCast ? 'Waiting for you to approve the cast' : `${stage ?? 'Processing'}...`) : 'Add a book from your device'}
           </Text>
 
           <Text style={s.fileTypes}>
             PDF · EPUB · TXT · MD · Up to 50 MB
           </Text>
         </Pressable>
+
+        {job?.awaitingCast && (
+          <Pressable style={[s.narratorCard, s.reviewCard]} onPress={() => setCastOpen(true)} accessibilityRole="button">
+            <View style={[s.narratorIcon, { backgroundColor: 'rgba(245,198,90,0.16)' }]}>
+              <Ionicons name="people-outline" size={22} color={colors.gold} />
+            </View>
+            <View style={s.narratorInfo}>
+              <Text style={s.narratorTitle}>The voices are ready</Text>
+              <Text style={s.narratorSubtitle} numberOfLines={2}>Listen to the cast and start narrating.</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={20} color={colors.faint} />
+          </Pressable>
+        )}
 
         {job && (job.chapters ?? []).some((chapter) => chapter.status === 'ready') && (
           <Pressable style={s.narratorCard} onPress={() => openJob(job)} accessibilityRole="button">
@@ -145,14 +178,14 @@ export default function Upload() {
           </Pressable>
         )}
 
-        <Pressable style={s.narratorCard} onPress={() => router.push('/narrator-voices')}>
+        <Pressable style={s.narratorCard} onPress={() => router.push('/voice-studio')}>
           <View style={s.narratorIcon}>
             <Ionicons name="mic-outline" size={22} color={colors.pink} />
           </View>
           <View style={s.narratorInfo}>
-            <Text style={s.narratorTitle}>Narrator Voice</Text>
+            <Text style={s.narratorTitle}>Voice Studio</Text>
             <Text style={s.narratorSubtitle} numberOfLines={1}>
-              {narratorName ? `Narrating as ${narratorName}` : 'Create and choose who reads your books'}
+              {narratorName ? `Narrating as ${narratorName}` : 'Design or record the voices that read your books'}
             </Text>
           </View>
           <Ionicons name="chevron-forward" size={20} color={colors.faint} />
@@ -255,13 +288,26 @@ export default function Upload() {
 
       </ScrollView>
 
+      {job && (
+        <CastSheet
+          visible={castOpen && Boolean(job.awaitingCast)}
+          bookId={job.jobId}
+          title={selectedFile ? bookTitle(selectedFile) : 'your book'}
+          cast={job.cast ?? []}
+          mode="review"
+          onClose={() => setCastOpen(false)}
+          onDone={() => { setCastOpen(false); setStage('Queued'); }}
+          onOpenStudio={openStudio}
+        />
+      )}
+
       <ClassicSheet book={openBook} saved={openBook ? saved.has(openBook.id) : false} onToggle={() => openBook && toggleSaved(openBook.id)} onClose={() => setOpenBook(null)} />
 
       <Sheet visible={helpOpen} onClose={() => setHelpOpen(false)} title="How uploading works">
         <View style={{ gap: 12, paddingBottom: 8 }}>
           {[
             ['document-text-outline', 'PDF, EPUB, TXT or Markdown, up to 50 MB. The file needs real text; scanned page images can’t be read yet.'],
-            ['people-outline', 'Echo reads the book, finds every character, and gives each one their own voice.'],
+            ['people-outline', 'Echo reads the book, finds every character, and gives each one their own voice. You hear the cast before narration starts, and can swap any voice for one from your Voice Studio.'],
             ['time-outline', 'Books with chapters are narrated one chapter at a time, so you can start listening as soon as the first is ready. You can leave this screen; we’ll keep working.'],
             ['mic-outline', 'Your chosen narrator reads everything that isn’t dialogue.'],
           ].map(([icon, text]) => (
@@ -357,6 +403,8 @@ const s = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
   },
+
+  reviewCard: { borderColor: 'rgba(245,198,90,0.5)' },
 
   narratorIcon: {
     width: 44,

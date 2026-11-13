@@ -68,6 +68,9 @@ def main() -> None:
             pacing_args = {"duration_factor": float(job.get("durationFactor", 1.0))}
             if job.get("maxMelTokens"):
                 pacing_args["max_mel_tokens"] = int(job["maxMelTokens"])
+            # numBeams: IndexTTS defaults to a 3-beam search in its autoregressive step; 1 is much faster.
+            if job.get("numBeams"):
+                pacing_args["num_beams"] = int(job["numBeams"])
             with redirect_stdout(sys.stderr):
                 tts.infer(
                     spk_audio_prompt=job["referencePath"],
