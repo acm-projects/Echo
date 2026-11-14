@@ -5,7 +5,9 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 export type Settings = {
   playbackSpeed: number;
   skipSeconds: 10 | 15 | 30;
-  sleepTimerMinutes: 0 | 15 | 30 | 45 | 60;
+  // The sleep timer length last chosen in the player, offered again next time (0 = none yet). Starting a timer
+  // happens in the player; this is only remembered.
+  sleepTimerMinutes: number;
   characterVoices: boolean;
   autoplayNextChapter: boolean;
   dailyReminder: boolean;

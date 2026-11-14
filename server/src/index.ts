@@ -24,7 +24,23 @@ const PYTHON = path.join(MODEL_ROOT, '.venv', 'bin', 'python');
 const WORKER = path.join(REPO_ROOT, 'workers', 'reader', 'reader.py');
 const MODEL_OUTPUTS = path.join(MODEL_ROOT, 'outputs');
 const FFMPEG = process.env.FFMPEG_PATH ?? 'ffmpeg';
-const SEGMENT_SILENCE_SECONDS = 0.2;
+// Silence between two lines, from how the first one ends: a comma is a breath ("…out there," June pleaded), a
+// sentence end a fuller stop. IndexTTS's own trailing silence is trimmed off (TRIM_EDGES), so this is the whole gap.
+const PAUSE_SECONDS = {
+  comma: Number(process.env.PAUSE_COMMA ?? 0.15),
+  clause: Number(process.env.PAUSE_CLAUSE ?? 0.3),
+  sentence: Number(process.env.PAUSE_SENTENCE ?? 0.5),
+  heading: Number(process.env.PAUSE_HEADING ?? 1.2),
+};
+
+function pauseAfter(text: string, kind: string) {
+  if (kind === 'heading') return PAUSE_SECONDS.heading;
+  const end = text.trim().replace(/["“”‘’')\]\s]+$/u, '').slice(-1);
+  if (end === ',') return PAUSE_SECONDS.comma;
+  if (';:—–-'.includes(end) && end !== '') return PAUSE_SECONDS.clause;
+  if ('.!?…'.includes(end) && end !== '') return PAUSE_SECONDS.sentence;
+  return PAUSE_SECONDS.comma;
+}
 
 const loadEnvFile = (process as typeof process & { loadEnvFile?: (file?: string) => void }).loadEnvFile;
 loadEnvFile?.(path.join(REPO_ROOT, '.env'));
@@ -141,6 +157,17 @@ function shapeDialogueEmotion(vector: z.infer<typeof emotionVectorSchema>) {
   const scale = total > DIALOGUE_MAX_TOTAL ? DIALOGUE_MAX_TOTAL / total : 1;
   for (const emotion of EMOTIONS) shaped[emotion] = Math.round(shaped[emotion] * scale * 100) / 100;
   return { capped: shaped, changed: EMOTIONS.some((emotion) => shaped[emotion] !== vector[emotion]) };
+}
+
+// IndexTTS2 blends an emotion vector in place of the reference speaker's own delivery: with a total weight w, only
+// (1 - w) of the speaker's conditioning is left (infer_v2_5: emovec_mat + (1 - sum) * emovec). For a voice cloned from
+// someone's recording that loss is what makes it stop sounding like them, so clones get a fraction of the emotion and
+// no "calm", which only dilutes: the recording already carries the speaker's resting delivery. Designed voices are
+// unchanged.
+const CLONE_EMOTION_SCALE = Number(process.env.CLONE_EMOTION_SCALE ?? 0.5);
+const isClonedVoice = (voiceId: string | undefined) => Boolean(voiceId?.startsWith('upload_'));
+function cloneEmotion(vector: number[]) {
+  return EMOTIONS.map((emotion, index) => (emotion === 'calm' ? 0 : Math.round(vector[index] * CLONE_EMOTION_SCALE * 100) / 100));
 }
 
 // Volume offsets relative to the -16 LUFS target; IndexTTS can't whisper or shout on its own, and per-segment
@@ -507,8 +534,9 @@ async function renderNarratorPreview(voice: NarratorVoice) {
   try {
     const referencePath = await localCopy(voice.referenceKey);
     if (!referencePath) throw new Error('reference missing');
-    const calm = EMOTIONS.map((emotion) => (emotion === 'calm' ? 0.5 : 0));
-    const outputPath = await runIndexTts(referencePath, voice.sampleText, 'calm, even narration', calm, pacingFor(voice.sampleText, true));
+    // Read the way books read a cloned voice: the speaker's own delivery and pace (see cloneEmotion).
+    const neutral = cloneEmotion(EMOTIONS.map((emotion) => (emotion === 'calm' ? 0.5 : 0)));
+    const outputPath = await runIndexTts(referencePath, voice.sampleText, 'calm, even narration', neutral, pacingFor(voice.sampleText, true, true));
     await putFile(voice.previewKey, outputPath);
     await rm(outputPath, { force: true });
     previewsPending.delete(voice.id);
@@ -624,9 +652,13 @@ async function latestNarratorReference() {
 // IndexTTS reads a little slowly for audiobook narration. A duration factor below 1 makes the same voice speak faster
 // at the same pitch (it shortens the generated speech rather than speeding up the audio).
 const NARRATOR_PACE = Number(process.env.NARRATOR_PACE ?? 0.9);
-// Short narrator lines between dialogue ("Walter said.") come out especially drawn out, so they're quickened more.
-const SPEECH_TAG_PACE = Number(process.env.SPEECH_TAG_PACE ?? 0.85);
+// Short narrator lines between dialogue ("June pleaded.") come out drawn out at the narration pace, so they're
+// quickened a little more. 0.85 was too fast (it squeezed the pauses inside them), 0.9 too slow; 0.875 splits it.
+const SPEECH_TAG_PACE = Number(process.env.SPEECH_TAG_PACE ?? 0.875);
 const SPEECH_TAG_MAX_WORDS = 8;
+// A cloned voice keeps its owner's own pace: the duration factor stretches the whole clip, which shifts the timbre.
+// Its speech tags get the same relative quickening as a designed voice's (0.875 / 0.9).
+const CLONE_PACE = Number(process.env.CLONE_PACE ?? 1);
 // IndexTTS generates 50 speech tokens a second, and on very short text it tends to run on past the words. Lines of
 // up to 12 words are capped at the length of slow speech (1.5 words a second) plus a second of slack.
 const SPEECH_TOKENS_PER_SECOND = 50;
@@ -635,10 +667,11 @@ const SHORT_LINE_MAX_WORDS = 12;
 // kept at the default until the two have been compared by ear.
 const INDEXTTS_NUM_BEAMS = Number(process.env.INDEXTTS_NUM_BEAMS ?? 3);
 
-function pacingFor(text: string, isNarration: boolean) {
+function pacingFor(text: string, isNarration: boolean, cloned = false) {
   const words = wordCount(text);
   return {
-    durationFactor: isNarration ? (words <= SPEECH_TAG_MAX_WORDS ? SPEECH_TAG_PACE : NARRATOR_PACE) : 1,
+    durationFactor: !isNarration ? (cloned ? CLONE_PACE : 1)
+      : (cloned ? CLONE_PACE : NARRATOR_PACE) * (words <= SPEECH_TAG_MAX_WORDS ? SPEECH_TAG_PACE / NARRATOR_PACE : 1),
     maxMelTokens: words <= SHORT_LINE_MAX_WORDS ? Math.ceil((words / 1.5 + 1) * SPEECH_TOKENS_PER_SECOND) : undefined,
   };
 }
@@ -697,7 +730,7 @@ const PCM_ARGS = ['-ar', String(SAMPLE_RATE), '-ac', '1', '-c:a', 'pcm_s16le'];
 const LOUDNORM_TARGETS = `I=${TARGET_LUFS}:TP=${TARGET_TRUE_PEAK}:LRA=${TARGET_LRA}`;
 
 // IndexTTS pads each clip with up to half a second of silence, which drags short lines out; the gap between segments
-// comes from SEGMENT_SILENCE_SECONDS instead. -50 dB sits below a whisper, and the reverse pass trims the end.
+// comes from pauseAfter instead. -50 dB sits below a whisper, and the reverse pass trims the end.
 const TRIM_EDGES = 'silenceremove=start_periods=1:start_threshold=-50dB:start_silence=0.05,areverse,silenceremove=start_periods=1:start_threshold=-50dB:start_silence=0.08,areverse';
 
 type LoudnessMeasurement = { input_i: string; input_tp: string; input_lra: string; input_thresh: string; target_offset: string };
@@ -711,9 +744,9 @@ async function measureLoudness(filePath: string) {
 
 // Each segment is gain-matched to the target (plus its delivery offset) so voices sit at the same level,
 // then the whole book gets one linear gain so the final file lands on -16 LUFS.
-// gainOffsetDb shifts a segment's target away from -16 LUFS (e.g. -10 dB for a whisper); pauseAfterSec adds silence
-// after a segment on top of the usual gap (after a chapter heading, say).
-async function stitchSegments(jobId: string, segments: Array<{ path: string; gainOffsetDb: number; pauseAfterSec?: number }>) {
+// gainOffsetDb shifts a segment's target away from -16 LUFS (e.g. -10 dB for a whisper); pauseAfterSec is the silence
+// before the next segment (see pauseAfter).
+async function stitchSegments(jobId: string, segments: Array<{ path: string; gainOffsetDb: number; pauseAfterSec: number }>) {
   if (!segments.length) throw new Error('Cannot stitch an empty segment list.');
 
   const workDir = path.join(TMP_ROOT, `${jobId}-segments`);
@@ -757,7 +790,7 @@ async function stitchSegments(jobId: string, segments: Array<{ path: string; gai
       entries.push(file);
       elapsedSec += ((await stat(file)).size - 44) / (SAMPLE_RATE * 2);
       if (index < leveledPaths.length - 1) {
-        const gapSec = SEGMENT_SILENCE_SECONDS + (segments[index].pauseAfterSec ?? 0);
+        const gapSec = segments[index].pauseAfterSec;
         entries.push(await silenceFor(gapSec));
         elapsedSec += gapSec;
       }
@@ -867,8 +900,6 @@ const isBookId = (value: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-
 const SEGMENT_CHUNK_CHARS = 8000;
 // Claude calls for one chapter's chunks are independent, so a few run at once.
 const SEGMENT_CONCURRENCY = 3;
-// Extra silence after a chapter or section heading, on top of the usual gap between segments.
-const HEADING_PAUSE_SECONDS = 1;
 // The cast is read from the book's opening; chapters past it are checked for new speakers before they're split.
 const ROSTER_EXCERPT_CHARS = 30000;
 // A narrating book touches its Supabase row this often; one silent for STALE_MINUTES is swept as interrupted.
@@ -1234,9 +1265,11 @@ async function runBook(state: JobState, sourceBuffer?: Buffer) {
           const { capped, changed } = isNarration ? capNarratorEmotion(segment.emotionVector) : shapeDialogueEmotion(segment.emotionVector);
           const delivery = isNarration ? 'normal' : segment.delivery;
           if (changed) adjustedVectors += 1;
-          const emotionVector = EMOTIONS.map((emotion) => capped[emotion]);
+          const cloned = isClonedVoice(state.voices[speaker]?.voiceId);
+          const shapedVector = EMOTIONS.map((emotion) => capped[emotion]);
+          const emotionVector = cloned ? cloneEmotion(shapedVector) : shapedVector;
           const speechText = segment.kind === 'dialogue' ? dialogueSpeechText(segment.text) : segment.text;
-          const outputPath = await runIndexTts(references.get(speaker)!, speechText, segment.emotion, emotionVector, pacingFor(speechText, isNarration), lineAudioUser(chapter.index));
+          const outputPath = await runIndexTts(references.get(speaker)!, speechText, segment.emotion, emotionVector, pacingFor(speechText, isNarration, cloned), lineAudioUser(chapter.index));
           outputSegments[index] = {
             index, speaker, kind: segment.kind, text: segment.text, emotion: segment.emotion, emotionVector: capped, delivery,
             ...(speechText !== segment.text ? { speechText } : {}),
@@ -1250,7 +1283,7 @@ async function runBook(state: JobState, sourceBuffer?: Buffer) {
         const { wavPath, mp3Path, startsSec } = await stitchSegments(`${jobId}-${chapter.index}`, outputSegments.map((segment) => ({
           path: segment.outputPath,
           gainOffsetDb: DELIVERY_GAIN_DB[segment.delivery],
-          pauseAfterSec: segment.kind === 'heading' ? HEADING_PAUSE_SECONDS : undefined,
+          pauseAfterSec: pauseAfter(segment.text, segment.kind),
         })));
         // Only the MP3 is kept; the WAV master is several times larger and nothing plays it.
         checkCancelled();

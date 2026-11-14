@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
+import { Platform } from 'react-native';
 import { createAudioPlayer, setAudioModeAsync, type AudioPlayer, type AudioStatus } from 'expo-audio';
-import { currentSettings, saveSetting } from './settings';
+import { currentSettings } from './settings';
 import { mediaUrl, VOICE_SERVER_URL, voiceServerHeaders } from './voiceServer';
 import { recordListening, saveProgress } from './progress';
 
@@ -64,7 +65,29 @@ let listenedSec = 0;
 let lastStatusAt = 0;
 let lastSavedAt = 0;
 let sleepTimer: ReturnType<typeof setTimeout> | null = null;
-let sleepMinutes = 0;
+// A new chapter's audio is a new player item, which on iOS starts with the default pitch algorithm again.
+let rateNeedsApply = false;
+
+// Faster or slower speech at the same pitch. 'high' is the only quality web honours for keeping the pitch (anything
+// else plays chipmunk-fast), and on iOS it picks the spectral algorithm, the cleanest for voices. Android always
+// keeps the pitch while shouldCorrectPitch is on.
+function applyRate(p: AudioPlayer, speed: number) {
+  try {
+    p.shouldCorrectPitch = true;
+  } catch {
+    // Read-only on some platforms; setPlaybackRate's quality still asks for pitch correction.
+  }
+  // Android's native setPlaybackRate takes the rate alone, and Expo rejects extra arguments.
+  if (Platform.OS === 'android') p.setPlaybackRate(speed);
+  else p.setPlaybackRate(speed, 'high');
+}
+
+function sleepNow() {
+  if (sleepTimer) clearTimeout(sleepTimer);
+  sleepTimer = null;
+  set({ sleepEndsAt: undefined });
+  pause();
+}
 
 function set(patch: Partial<NowPlaying>) {
   state = { ...state, ...patch };
@@ -113,7 +136,17 @@ function onStatus(status: AudioStatus) {
     player?.seekTo(pendingSeekSec).catch(() => {});
     pendingSeekSec = null;
   }
+  if (rateNeedsApply && status.isLoaded && player) {
+    rateNeedsApply = false;
+    applyRate(player, state.speed);
+  }
   const now = Date.now();
+  // Backs up the sleep timeout, which a phone may hold back while the app is in the background; status updates keep
+  // arriving as long as audio plays.
+  if (state.sleepEndsAt && now >= state.sleepEndsAt && status.playing) {
+    sleepNow();
+    return;
+  }
   // Wall-clock time spent listening, so 2x speed counts the minutes actually spent.
   if (status.playing && lastStatusAt) listenedSec += Math.min(now - lastStatusAt, 2000) / 1000;
   lastStatusAt = status.playing ? now : 0;
@@ -220,8 +253,9 @@ export const playback = {
       if (token !== loadToken || !uri) return;
       pendingSeekSec = startAtSec && startAtSec > 1 ? startAtSec : null;
       p.replace({ uri });
+      rateNeedsApply = true;
     }
-    p.setPlaybackRate(state.speed);
+    applyRate(p, state.speed);
     p.play();
     showOnLockScreen();
   },
@@ -245,26 +279,22 @@ export const playback = {
     set({ positionSec: position });
   },
   setSpeed: (speed: number) => {
-    if (state.audioPath) player?.setPlaybackRate(speed);
+    if (state.audioPath && player) applyRate(player, speed);
     set({ speed });
   },
-  // Pauses after `minutes` (0 cancels) and switches the setting back off. Setting the same minutes again keeps
-  // the timer that's already running, so reopening the player doesn't restart it.
+  // Pauses playback `minutes` from now (any length; 0 or less turns the timer off). Starting it again restarts it.
   setSleepTimer: (minutes: number) => {
-    if (minutes === sleepMinutes) return;
-    sleepMinutes = minutes;
     if (sleepTimer) clearTimeout(sleepTimer);
     sleepTimer = null;
-    if (!minutes) return set({ sleepEndsAt: undefined });
-    const endsAt = Date.now() + minutes * 60_000;
-    sleepTimer = setTimeout(() => {
-      sleepTimer = null;
-      sleepMinutes = 0;
-      pause();
-      set({ sleepEndsAt: undefined });
-      saveSetting('sleepTimerMinutes', 0);
-    }, minutes * 60_000);
-    set({ sleepEndsAt: endsAt });
+    if (!(minutes > 0)) return set({ sleepEndsAt: undefined });
+    const ms = Math.round(minutes * 60_000);
+    sleepTimer = setTimeout(sleepNow, ms);
+    set({ sleepEndsAt: Date.now() + ms });
+  },
+  // Adds time to a running timer (or starts one).
+  extendSleepTimer: (minutes: number) => {
+    const left = state.sleepEndsAt ? Math.max(0, state.sleepEndsAt - Date.now()) / 60_000 : 0;
+    playback.setSleepTimer(left + minutes);
   },
 };
 
@@ -284,4 +314,25 @@ export function formatTime(totalSec: number) {
   const sec = Math.floor(totalSec);
   const m = Math.floor(sec / 60);
   return `${m}:${String(sec % 60).padStart(2, '0')}`;
+}
+
+/** Seconds until the sleep timer pauses playback, ticking every second; null with no timer running. */
+export function useSleepCountdown() {
+  const { sleepEndsAt } = useNowPlaying();
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  useEffect(() => {
+    if (!sleepEndsAt) return;
+    setNowMs(Date.now());
+    const tick = setInterval(() => setNowMs(Date.now()), 1000);
+    return () => clearInterval(tick);
+  }, [sleepEndsAt]);
+  return sleepEndsAt ? Math.max(0, Math.ceil((sleepEndsAt - nowMs) / 1000)) : null;
+}
+
+/** "4:05" or "1:02:30" for a countdown. */
+export function formatCountdown(seconds: number) {
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const sec = String(seconds % 60).padStart(2, '0');
+  return h ? `${h}:${String(m).padStart(2, '0')}:${sec}` : `${m}:${sec}`;
 }
