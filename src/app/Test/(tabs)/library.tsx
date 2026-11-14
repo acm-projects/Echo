@@ -26,6 +26,7 @@ import {
 
 const accent = scenes.dusk.accent;
 
+<<<<<<< Updated upstream
 const GENRE_COPY: Record<GenreId, string> = {
   fantasy: 'Beyond reality',
   classics: 'Timeless stories',
@@ -39,6 +40,18 @@ function openGenre(id: GenreId) {
   router.push({
     pathname: '/Test/genre/[id]',
     params: { id },
+=======
+// Discover books aren't in the reader's library yet, so they carry a slug id rather than a database id; Book Details
+// treats such a book as a preview (no chapters, no server actions).
+function openBook(book: DiscoverBook) {
+  router.push({
+    pathname: '/Test/book_details',
+    params: {
+      id: `discover-${book.title.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
+      title: book.title,
+      author: book.author,
+    },
+>>>>>>> Stashed changes
   });
 }
 

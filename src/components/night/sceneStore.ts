@@ -27,6 +27,7 @@ const ROUTE_INTERIORS: Record<string, InteriorKind> = {
   '/Test/catalog': 'harbor',
   '/Test/room': 'cafe',
   '/Test/people': 'cafe',
+  '/Test/new-room': 'cafe',
   '/Test/notification-settings': 'radioroom',
   '/Test/animation-settings': 'radioroom',
   '/Test/help': 'radioroom',

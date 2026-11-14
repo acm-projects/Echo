@@ -15,6 +15,7 @@ import { ClassicSheet } from '../../components/ClassicSheet';
 import { CastSheet } from '../../components/CastSheet';
 import { CLASSICS, useSavedClassics, type Classic } from '../../data/catalog';
 import { useSettings } from '../../data/settings';
+import { signedInClient } from '../../data/supabaseRows';
 
 // Same title the server gives the book: the file name without its extension.
 const bookTitle = (fileName: string) => fileName.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ').trim();
@@ -67,6 +68,12 @@ export default function Upload() {
   };
 
   const selectAndProcess = async () => {
+    // Narration spends Claude and Gemini credits, so the server only takes books from signed-in readers.
+    if (!(await signedInClient())) {
+      notify('Sign in to add a book', 'Narrating a book needs an Echo account.');
+      router.push('/Test/login');
+      return;
+    }
     const result = await DocumentPicker.getDocumentAsync({
       type: ['application/pdf', 'application/epub+zip', 'text/plain', 'text/markdown', 'application/octet-stream'],
       copyToCacheDirectory: true,

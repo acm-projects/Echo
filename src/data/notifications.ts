@@ -3,8 +3,7 @@ import * as Notifications from 'expo-notifications';
 import { currentSettings } from './settings';
 
 // Local notifications, scheduled on the device: the bedtime reminder (Notifications > Bedtime story reminder) and a
-// note when a new chapter finishes (… > A new book finishes processing). Friends' activity needs pushes sent from a
-// server, which Echo doesn't have yet. The web build has no notifications, so everything here is skipped there.
+// note when a new chapter finishes (… > A new book finishes processing). The web build has no notifications, so everything here is skipped there.
 
 const REMINDER_ID = 'echo-bedtime-reminder';
 const REMINDER_HOUR = 20;

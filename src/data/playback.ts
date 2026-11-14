@@ -36,17 +36,21 @@ const SIMULATED_DURATION_SEC = 40 * 60;
 // Progress is saved this often while playing, and whenever playback pauses or a chapter ends.
 const SAVE_EVERY_MS = 15_000;
 
+// Nothing is loaded until the reader opens a book: the mini-player stays hidden and the Player says so.
 let state: NowPlaying = {
-  title: 'The Night Circus',
-  author: 'Erin Morgenstern',
-  chapter: 'The room beneath the stars',
-  chapterNumber: 7,
-  positionSec: 14 * 60 + 22,
-  durationSec: SIMULATED_DURATION_SEC,
+  title: '',
+  author: '',
+  chapter: '',
+  chapterNumber: 0,
+  positionSec: 0,
+  durationSec: 0,
   isPlaying: false,
   speed: 1,
-  speaker: 'Narrator',
+  speaker: '',
 };
+
+/** Whether a book has been loaded into the player this session. */
+export const hasTrack = (now: NowPlaying) => now.title !== '';
 
 const listeners = new Set<(s: NowPlaying) => void>();
 let ticker: ReturnType<typeof setInterval> | null = null;

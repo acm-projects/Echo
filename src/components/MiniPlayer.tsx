@@ -2,14 +2,16 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { ProgressBar } from './ProgressBar';
 import { colors, type } from '../../theme';
-import { playback, useNowPlaying } from '../data/playback';
+import { hasTrack, playback, useNowPlaying } from '../data/playback';
 import { useSettings } from '../data/settings';
 
 // Spotify-style bar. Sits directly above the tab bar (see (tabs)/_layout.tsx) and takes the active tab's accent.
 // The open area and the controls are sibling buttons: nesting them would put a <button> inside a <button> on web.
+// Hidden until the reader has opened a book this session.
 export function MiniPlayer({ accent = colors.blue, onOpen }: { accent?: string; onOpen?: () => void }) {
   const now = useNowPlaying();
   const [settings] = useSettings();
+  if (!hasTrack(now)) return null;
   return (
     <View style={s.wrap}>
       <View style={s.row}>

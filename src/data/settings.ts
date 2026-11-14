@@ -9,7 +9,6 @@ export type Settings = {
   characterVoices: boolean;
   autoplayNextChapter: boolean;
   dailyReminder: boolean;
-  friendActivity: boolean;
   newChapters: boolean;
   // Each kind of animation can be switched off on its own (Reduce Motion in the OS turns them all off).
   motionNavigation: boolean;
@@ -37,7 +36,6 @@ export const DEFAULT_SETTINGS: Settings = {
   characterVoices: true,
   autoplayNextChapter: true,
   dailyReminder: true,
-  friendActivity: true,
   newChapters: false,
   motionNavigation: true,
   motionOpening: true,

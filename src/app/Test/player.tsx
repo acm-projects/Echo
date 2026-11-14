@@ -9,7 +9,7 @@ import { Sheet, SheetItem } from '../../components/Sheet';
 import { FlyingBat, HangingBat } from '../../components/night/Bat';
 import { useReducedMotion } from '../../components/night/NightSky';
 import { colors, fonts, radius, scenes, type } from '../../../theme';
-import { formatTime, playback, useNowPlaying } from '../../data/playback';
+import { formatTime, hasTrack, playback, useNowPlaying } from '../../data/playback';
 import { useSettings } from '../../data/settings';
 
 const SPEEDS = [0.8, 1, 1.25, 1.5, 2];
@@ -52,7 +52,7 @@ function Cover({ title, author, playing }: { title: string; author: string; play
         <View style={{ marginTop: 'auto' }}>
           <Text style={s.coverTitle}>{title}</Text>
           <View style={s.coverLine} />
-          <Text style={s.coverAuthor}>{author.toUpperCase()}</Text>
+          <Text style={s.coverAuthor}>{(author || '').toUpperCase()}</Text>
         </View>
       </View>
       <Svg width="100%" height={46} viewBox="0 0 300 46" preserveAspectRatio="none" style={s.coverCity}>
@@ -79,6 +79,30 @@ export default function Player() {
 
   const collapse = () => (router.canGoBack() ? router.back() : router.navigate('/Test/library'));
   const nextSpeed = () => playback.setSpeed(SPEEDS[(SPEEDS.indexOf(now.speed) + 1) % SPEEDS.length]);
+  // Cycle 0 → 15 → 30 → 45 → 60 → 0; a saved value outside the list starts over.
+  const nextSleep = () => update('sleepTimerMinutes', ({ 0: 15, 15: 30, 30: 45, 45: 60, 60: 0 } as const)[settings.sleepTimerMinutes] ?? 0);
+
+  // Opened before any book was played (from the tab bar, or a deep link).
+  if (!hasTrack(now)) {
+    return (
+      <Screen scene="neon" variant="hero" style={{ paddingHorizontal: 24 }}>
+        <View style={s.top}>
+          <Pressable style={s.round} onPress={collapse} accessibilityRole="button" accessibilityLabel="Close player">
+            <Ionicons name="chevron-down" size={20} color={colors.text} />
+          </Pressable>
+        </View>
+        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', gap: 10, paddingBottom: 120 }}>
+          <HangingBat size={28} />
+          <Text style={[s.chapter, { marginTop: 12 }]}>Nothing playing yet</Text>
+          <Text style={[type.body, { textAlign: 'center', color: colors.dim }]}>Pick a book from your shelf and it will play here.</Text>
+          <Pressable style={[s.pill, { marginTop: 10 }]} onPress={() => router.navigate('/Test/shelf')} accessibilityRole="button">
+            <Ionicons name="library-outline" size={14} color={colors.text} />
+            <Text style={s.pillText}>Your shelf</Text>
+          </Pressable>
+        </View>
+      </Screen>
+    );
+  }
 
   return (
     <Screen scene="neon" variant="hero" style={{ paddingHorizontal: 24 }}>
@@ -161,7 +185,7 @@ export default function Player() {
             </Pressable>
           ))}
         </View>
-        <SheetItem icon="moon-outline" label="Sleep timer" detail={settings.sleepTimerMinutes ? `${settings.sleepTimerMinutes} min` : 'Off'} onPress={() => update('sleepTimerMinutes', ({ 0: 15, 15: 30, 30: 45, 45: 60, 60: 0 } as const)[settings.sleepTimerMinutes])} />
+        <SheetItem icon="moon-outline" label="Sleep timer" detail={settings.sleepTimerMinutes ? `${settings.sleepTimerMinutes} min` : 'Off'} onPress={nextSleep} />
         <SheetItem icon="book-outline" label="Book details & cast" onPress={() => { setMenu(false); router.push({ pathname: '/Test/book_details', params: { id: now.bookId, title: now.title, author: now.author } }); }} />
         <SheetItem icon="options-outline" label="Playback settings" detail="Speed, skip, autoplay" onPress={() => { setMenu(false); router.push('/Test/playback-settings'); }} />
       </Sheet>

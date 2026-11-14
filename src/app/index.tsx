@@ -1,28 +1,6 @@
-import { useRouter } from "expo-router";
-import { useEffect } from "react";
-import { StyleSheet, Text, View } from "react-native";
+import { Redirect } from 'expo-router';
 
+// The app opens on the welcome screen; this route only exists because expo-router needs an index.
 export default function Index() {
-
-  const router = useRouter();
-  
-  useEffect(() => {
-    router.replace("/Test/welcome");
-  }, []);
-
-
-  
-  return (
-    <View style={styles.container}>
-      <Text>Edit src/app/index.tsx to edit this screen.</Text>
-    </View>
-  );
+  return <Redirect href="/Test/welcome" />;
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-});

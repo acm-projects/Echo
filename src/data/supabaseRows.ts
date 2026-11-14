@@ -13,6 +13,10 @@ const PROGRESS_COLUMNS = 'id, user_id, book_id, chapter_id, position_ms, playbac
 const COMMUNITY_COLUMNS = 'id, book_id, user_id, title, description, tags, language, status, published_at, play_count, save_count, rating_avg, rating_count, review_count, created_at, updated_at';
 const REVIEW_COLUMNS = 'id, community_book_id, user_id, parent_id, rating, title, body, is_edited, deleted_at, created_at, updated_at';
 
+// Book ids are uuids; anything else (a Library preview's slug) can't be in Supabase, so it isn't asked.
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+export const isBookId = (id: string) => UUID.test(id);
+
 export async function signedInClient() {
   try {
     const { supabase } = await import('../../lib/supabase');
@@ -39,7 +43,7 @@ export async function supabaseMyBooks(): Promise<Book[]> {
 }
 
 export async function supabaseBook(bookId: string): Promise<Book | null> {
-  const client = await signedInClient();
+  const client = isBookId(bookId) ? await signedInClient() : null;
   if (!client) return null;
   // Only the reader's own books: Supabase would also return a book someone else published to the community.
   const [book] = await rows<Book>('book', client.supabase.from('books').select(BOOK_COLUMNS).eq('id', bookId).eq('user_id', client.userId).is('deleted_at', null).limit(1));
@@ -47,13 +51,13 @@ export async function supabaseBook(bookId: string): Promise<Book | null> {
 }
 
 export async function supabaseChapters(bookId: string): Promise<Chapter[]> {
-  const client = await signedInClient();
+  const client = isBookId(bookId) ? await signedInClient() : null;
   if (!client) return [];
   return rows<Chapter>('chapters', client.supabase.from('chapters').select(`${CHAPTER_COLUMNS}, books!inner(user_id)`).eq('book_id', bookId).eq('books.user_id', client.userId).order('chapter_index', { ascending: true }));
 }
 
 export async function supabaseCharacters(bookId: string): Promise<Character[]> {
-  const client = await signedInClient();
+  const client = isBookId(bookId) ? await signedInClient() : null;
   if (!client) return [];
   return rows<Character>('characters', client.supabase.from('characters').select(`${CHARACTER_COLUMNS}, books!characters_book_id_fkey!inner(user_id)`).eq('book_id', bookId).eq('books.user_id', client.userId).order('name', { ascending: true }));
 }
@@ -65,7 +69,7 @@ export async function supabaseMyProgress(): Promise<UserProgress[]> {
 }
 
 export async function supabaseBookProgress(bookId: string): Promise<UserProgress | null> {
-  const client = await signedInClient();
+  const client = isBookId(bookId) ? await signedInClient() : null;
   if (!client) return null;
   const [record] = await rows<UserProgress>('book progress', client.supabase.from('user_progress').select(PROGRESS_COLUMNS).eq('user_id', client.userId).eq('book_id', bookId).limit(1));
   return record ?? null;
@@ -101,14 +105,4 @@ export async function supabaseCommunityReviews(communityBookId: string): Promise
   const client = await signedInClient();
   if (!client) return [];
   return rows<ReviewComment>('reviews', client.supabase.from('reviews_comments').select(REVIEW_COLUMNS).eq('community_book_id', communityBookId).is('deleted_at', null).order('created_at', { ascending: false }));
-}
-
-/** A book room's posts with their authors' display names, newest first. */
-export async function supabaseRoomPosts(roomId: string) {
-  const client = await signedInClient();
-  if (!client) return [];
-  return rows<{ id: string; body: string; chapter_index: number | null; created_at: string; users: { display_name: string | null; username: string } | null }>(
-    'room posts',
-    client.supabase.from('room_posts').select('id, body, chapter_index, created_at, users(display_name, username)').eq('room_id', roomId).is('deleted_at', null).order('created_at', { ascending: false }).limit(100),
-  );
 }

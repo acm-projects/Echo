@@ -16,26 +16,60 @@ export type Database = {
     Tables: {
       book_rooms: {
         Row: {
-          catalog_book_id: string
+          book_author: string | null
+          book_title: string
+          book_title_key: string | null
+          catalog_book_id: string | null
           created_at: string
+          created_by: string | null
+          description: string | null
           id: string
+          invite_code: string | null
+          name: string
+          updated_at: string
+          visibility: Database["public"]["Enums"]["room_visibility"]
         }
         Insert: {
-          catalog_book_id: string
+          book_author?: string | null
+          book_title: string
+          book_title_key?: string | null
+          catalog_book_id?: string | null
           created_at?: string
+          created_by?: string | null
+          description?: string | null
           id?: string
+          invite_code?: string | null
+          name: string
+          updated_at?: string
+          visibility?: Database["public"]["Enums"]["room_visibility"]
         }
         Update: {
-          catalog_book_id?: string
+          book_author?: string | null
+          book_title?: string
+          book_title_key?: string | null
+          catalog_book_id?: string | null
           created_at?: string
+          created_by?: string | null
+          description?: string | null
           id?: string
+          invite_code?: string | null
+          name?: string
+          updated_at?: string
+          visibility?: Database["public"]["Enums"]["room_visibility"]
         }
         Relationships: [
           {
             foreignKeyName: "book_rooms_catalog_book_id_fkey"
             columns: ["catalog_book_id"]
-            isOneToOne: true
+            isOneToOne: false
             referencedRelation: "catalog_books"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "book_rooms_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "users"
             referencedColumns: ["id"]
           },
         ]
@@ -569,56 +603,6 @@ export type Database = {
           },
         ]
       }
-      narrator_voices: {
-        Row: {
-          created_at: string
-          description: string
-          id: string
-          is_selected: boolean
-          name: string
-          preview_path: string
-          reference_path: string
-          sample_text: string
-          updated_at: string
-          user_id: string
-          voice_id: string
-        }
-        Insert: {
-          created_at?: string
-          description: string
-          id?: string
-          is_selected?: boolean
-          name: string
-          preview_path: string
-          reference_path: string
-          sample_text: string
-          updated_at?: string
-          user_id: string
-          voice_id: string
-        }
-        Update: {
-          created_at?: string
-          description?: string
-          id?: string
-          is_selected?: boolean
-          name?: string
-          preview_path?: string
-          reference_path?: string
-          sample_text?: string
-          updated_at?: string
-          user_id?: string
-          voice_id?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "narrator_voices_user_id_fkey"
-            columns: ["user_id"]
-            isOneToOne: false
-            referencedRelation: "users"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
       narration_scripts: {
         Row: {
           alignment: Json
@@ -688,6 +672,56 @@ export type Database = {
             columns: ["character_id"]
             isOneToOne: false
             referencedRelation: "characters"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      narrator_voices: {
+        Row: {
+          created_at: string
+          description: string
+          id: string
+          is_selected: boolean
+          name: string
+          preview_path: string
+          reference_path: string
+          sample_text: string
+          updated_at: string
+          user_id: string
+          voice_id: string
+        }
+        Insert: {
+          created_at?: string
+          description: string
+          id?: string
+          is_selected?: boolean
+          name: string
+          preview_path: string
+          reference_path: string
+          sample_text: string
+          updated_at?: string
+          user_id: string
+          voice_id: string
+        }
+        Update: {
+          created_at?: string
+          description?: string
+          id?: string
+          is_selected?: boolean
+          name?: string
+          preview_path?: string
+          reference_path?: string
+          sample_text?: string
+          updated_at?: string
+          user_id?: string
+          voice_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "narrator_voices_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
             referencedColumns: ["id"]
           },
         ]
@@ -790,6 +824,42 @@ export type Database = {
           },
           {
             foreignKeyName: "reviews_comments_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      room_members: {
+        Row: {
+          joined_at: string
+          role: string
+          room_id: string
+          user_id: string
+        }
+        Insert: {
+          joined_at?: string
+          role?: string
+          room_id: string
+          user_id: string
+        }
+        Update: {
+          joined_at?: string
+          role?: string
+          room_id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "room_members_room_id_fkey"
+            columns: ["room_id"]
+            isOneToOne: false
+            referencedRelation: "book_rooms"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "room_members_user_id_fkey"
             columns: ["user_id"]
             isOneToOne: false
             referencedRelation: "users"
@@ -1441,7 +1511,38 @@ export type Database = {
     Functions: {
       are_friends: { Args: { a: string; b: string }; Returns: boolean }
       can_read_book: { Args: { p_book_id: string }; Returns: boolean }
+      can_see_room: { Args: { p_room: string }; Returns: boolean }
       can_view_profile_stats: { Args: { p_user: string }; Returns: boolean }
+      create_book_room: {
+        Args: {
+          p_book_author?: string
+          p_book_title: string
+          p_catalog_book_id?: string
+          p_description?: string
+          p_name: string
+          p_visibility?: Database["public"]["Enums"]["room_visibility"]
+        }
+        Returns: {
+          book_author: string | null
+          book_title: string
+          book_title_key: string | null
+          catalog_book_id: string | null
+          created_at: string
+          created_by: string | null
+          description: string | null
+          id: string
+          invite_code: string | null
+          name: string
+          updated_at: string
+          visibility: Database["public"]["Enums"]["room_visibility"]
+        }
+        SetofOptions: {
+          from: "*"
+          to: "book_rooms"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       friends_leaderboard: {
         Args: { p_end: string; p_start: string }
         Returns: {
@@ -1459,6 +1560,8 @@ export type Database = {
         Args: { p_community_book_id: string }
         Returns: number
       }
+      is_room_member: { Args: { p_room: string }; Returns: boolean }
+      join_room_by_code: { Args: { p_code: string }; Returns: string }
       live_streak: {
         Args: {
           p_current: number
@@ -1468,10 +1571,17 @@ export type Database = {
         }
         Returns: number
       }
-      my_catalog_chapter_index: {
-        Args: { p_catalog_book_id: string }
-        Returns: number
+      my_room_books: { Args: { p_room: string }; Returns: string[] }
+      my_room_chapter_index: { Args: { p_room: string }; Returns: number }
+      my_room_shelf: {
+        Args: never
+        Returns: {
+          book_id: string
+          chapter_index: number
+          room_id: string
+        }[]
       }
+      new_room_code: { Args: never; Returns: string }
       record_listening: {
         Args: { p_chapters_completed?: number; p_seconds: number }
         Returns: {
@@ -1541,6 +1651,7 @@ export type Database = {
         | "failed"
       profile_visibility: "public" | "friends_only" | "private"
       publish_status: "draft" | "published" | "unlisted" | "removed"
+      room_visibility: "public" | "private"
       script_line_type: "narration" | "dialogue" | "thought"
       source_file_type: "pdf" | "epub" | "txt" | "md"
       summary_type: "book" | "chapter" | "character"
@@ -1688,6 +1799,7 @@ export const Constants = {
       ],
       profile_visibility: ["public", "friends_only", "private"],
       publish_status: ["draft", "published", "unlisted", "removed"],
+      room_visibility: ["public", "private"],
       script_line_type: ["narration", "dialogue", "thought"],
       source_file_type: ["pdf", "epub", "txt", "md"],
       summary_type: ["book", "chapter", "character"],

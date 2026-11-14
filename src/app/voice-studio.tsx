@@ -10,6 +10,8 @@ import { Screen } from '../components/Screen';
 import { Sheet, SheetItem } from '../components/Sheet';
 import { ClientOnly } from '../../lib/ClientOnly';
 import { CityLoader } from '../components/CityLoader';
+import { EmptyState } from '../components/EmptyState';
+import { signedInClient } from '../data/supabaseRows';
 import { colors, fonts, type } from '../../theme';
 import { createNarrator, deleteNarrator, getNarrators, narratorPreviewUrl, selectNarrator, uploadNarrator, type NarratorState, type NarratorVoice } from '../data/narrators';
 
@@ -40,6 +42,8 @@ function VoiceStudio() {
   const [tab, setTab] = useState<'describe' | 'upload'>('describe');
   const [working, setWorking] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Voices belong to an account; signed out, the studio only offers to sign in.
+  const [signedOut, setSignedOut] = useState(false);
   const [playingId, setPlayingId] = useState<string | null>(null);
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
@@ -60,6 +64,11 @@ function VoiceStudio() {
     let timer: ReturnType<typeof setTimeout> | null = null;
     const poll = async () => {
       try {
+        if (!(await signedInClient())) {
+          if (active) setSignedOut(true);
+          return;
+        }
+        if (active) setSignedOut(false);
         const next = await getNarrators();
         if (!active) return;
         setState(next);
@@ -175,6 +184,22 @@ function VoiceStudio() {
   const uploadLimit = state !== null && state.uploadsRemainingToday === 0;
   const canDesign = !working && !designLimit && description.trim().length >= 20;
   const canUpload = !working && !uploadLimit && recording !== null && consent;
+
+  if (signedOut) {
+    return (
+      <Screen interior="studio">
+        <View style={s.content}>
+          <View style={s.header}>
+            <Pressable style={s.iconButton} onPress={() => (router.canGoBack() ? router.back() : router.navigate('/Test/upload'))} hitSlop={8} accessibilityLabel="Go back">
+              <Ionicons name="chevron-back" size={20} color={colors.text} />
+            </Pressable>
+          </View>
+          <Text style={type.h1}>Voice Studio</Text>
+          <EmptyState title="Sign in to make voices" body="Your voices are kept with your account, so they're there on every device and every book." action="Sign in" onAction={() => router.push('/Test/login')} />
+        </View>
+      </Screen>
+    );
+  }
 
   return (
     <Screen interior="studio">

@@ -52,7 +52,7 @@ begin
    where source = 'seed' and source_id = 'echo-seed-1';
 
   -- ---------------------------------------------------------------------------
-  -- 1. Catalog book (a trigger creates its Book Room)
+  -- 1. Catalog book, and a public Book Room about it
   -- ---------------------------------------------------------------------------
   insert into public.catalog_books
     (title, author, description, language, is_public_domain, source, source_id, source_file_path)
@@ -62,9 +62,11 @@ begin
      'en', true, 'seed', 'echo-seed-1', 'test/catalog/lantern-keeper.pdf')
   returning id into v_catalog;
 
-  -- Safety net in case the room trigger is not installed
-  insert into public.book_rooms (catalog_book_id) values (v_catalog)
-  on conflict (catalog_book_id) do nothing;
+  -- Rooms are made by readers now; this one stands in for a public room User 1 made.
+  insert into public.book_rooms (catalog_book_id, name, book_title, book_author, visibility, created_by)
+  values (v_catalog, 'The Lantern Keeper', 'The Lantern Keeper', 'Test Author', 'public', v_u1);
+  insert into public.room_members (room_id, user_id, role)
+  select id, v_u1, 'owner' from public.book_rooms where catalog_book_id = v_catalog;
 
   -- ---------------------------------------------------------------------------
   -- 2. User 1's two books

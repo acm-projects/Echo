@@ -302,7 +302,6 @@ const UPLOAD_MAX_BYTES = 25 * 1024 * 1024;
 const UPLOAD_CLIP_SECONDS = 20;
 const UPLOAD_MIN_SECONDS = 3;
 const REFERENCE_SAMPLE_RATE = 24000;
-const NARRATOR_STORE = 'narrators/index.json';
 const DEFAULT_NARRATOR_SAMPLE = 'The room beneath the stars was silent, except for the soft turning of a page. Somewhere far below, a door opened, and the story began.';
 
 const narratorRequestSchema = z.object({
@@ -311,8 +310,9 @@ const narratorRequestSchema = z.object({
   sampleText: z.string().trim().min(1).max(500).optional(),
 });
 
-// A voice in the studio: designed by Gemini from a description, or cloned from a recording the user uploaded. Older
-// store entries have no kind and are designed.
+// A voice in the studio: designed by Gemini from a description, or cloned from a recording the user uploaded.
+// Supabase's narrator_voices is the only record of a voice (is_selected marks the reader's narrator); its two clips
+// are in S3 at the row's reference_path and preview_path. Only signed-in readers have voices.
 type NarratorVoice = {
   id: string;
   userId: string;
@@ -322,32 +322,34 @@ type NarratorVoice = {
   createdAt: string;
   referenceKey: string;
   previewKey: string;
-  kind?: 'designed' | 'uploaded';
-  // An uploaded voice's preview is the recording itself until IndexTTS has read the sample line with it.
-  previewPending?: boolean;
+  kind: 'designed' | 'uploaded';
+  // An uploaded voice's preview is the recording itself until IndexTTS has read the sample line with it. Tracked in
+  // memory: after a restart the recording simply stays the preview.
+  previewPending: boolean;
 };
-const voiceKind = (voice: NarratorVoice) => voice.kind ?? (voice.id.startsWith('upload_') ? 'uploaded' : 'designed');
-type NarratorStore = { voices: NarratorVoice[]; selected: Record<string, string> };
-
-// Serializes read-modify-write cycles on the JSON store.
-let narratorStoreLock: Promise<unknown> = Promise.resolve();
+const voiceKind = (voice: NarratorVoice) => voice.kind;
+const previewsPending = new Set<string>();
 const narratorCreationsInFlight = new Map<string, number>();
 
-async function readNarratorStore(): Promise<NarratorStore> {
-  // A missing store is a fresh start; a store that can't be read must not be overwritten with an empty one.
-  const text = await readText(NARRATOR_STORE);
-  return text ? JSON.parse(text) as NarratorStore : { voices: [], selected: {} };
+/** The reader's voices, newest first, and which one is their narrator. */
+async function myVoices(who: Requester): Promise<{ voices: NarratorVoice[]; selectedId: string | null }> {
+  if (!who.signedIn) return { voices: [], selectedId: null };
+  const rows = await getNarratorVoices(who.id);
+  const voices = rows.map((row): NarratorVoice => ({
+    id: row.voice_id, userId: who.id, name: row.name, description: row.description, sampleText: row.sample_text, createdAt: row.created_at,
+    referenceKey: row.reference_path, previewKey: row.preview_path,
+    kind: row.voice_id.startsWith('upload_') ? 'uploaded' : 'designed', previewPending: previewsPending.has(row.voice_id),
+  })).sort((x, y) => y.createdAt.localeCompare(x.createdAt));
+  return { voices, selectedId: rows.find((row) => row.is_selected)?.voice_id ?? null };
 }
 
-function updateNarratorStore<T>(change: (store: NarratorStore) => T | Promise<T>) {
-  const run = narratorStoreLock.then(async () => {
-    const store = await readNarratorStore();
-    const result = await change(store);
-    await putBytes(NARRATOR_STORE, JSON.stringify(store, null, 2));
-    return result;
-  });
-  narratorStoreLock = run.catch(() => {});
-  return run;
+const findVoice = async (who: Requester, voiceId: string) => (await myVoices(who)).voices.find((voice) => voice.id === voiceId);
+
+// The Voice Studio spends Gemini quota and model time, so it's for signed-in readers only.
+function needsAccount(who: Requester, reply: FastifyReply) {
+  if (who.signedIn) return false;
+  void reply.code(401).send({ error: 'Sign in to use the Voice Studio.' });
+  return true;
 }
 
 function narratorUserId(request: { headers: Record<string, string | string[] | undefined> }) {
@@ -357,8 +359,8 @@ function narratorUserId(request: { headers: Record<string, string | string[] | u
 }
 
 // Who a request is for. A verified Supabase session makes the signed-in user the owner, and only then are rows
-// written to Supabase. The x-echo-user id (the app's mock user) stays as `testId`, so the test narrators made
-// before sign-in keep showing up alongside the user's own while the app still runs on mock data.
+// written to Supabase. The x-echo-user id (the app's mock user) stays as `testId` only so books made before sign-in
+// existed can still be opened by the device that made them.
 type Requester = { id: string; testId: string; signedIn: boolean };
 
 async function requester(request: { headers: Record<string, string | string[] | undefined> }): Promise<Requester> {
@@ -367,16 +369,14 @@ async function requester(request: { headers: Record<string, string | string[] | 
   return { id: userId ?? testId, testId, signedIn: Boolean(userId) };
 }
 
-const canUseNarrator = (voice: NarratorVoice, who: Requester) => voice.userId === who.id || voice.userId === who.testId;
-const selectedNarratorId = (store: NarratorStore, who: Requester) => store.selected[who.id] ?? store.selected[who.testId];
 
 function localDay(date: Date) {
   return date.toLocaleDateString('en-CA');
 }
 
-function narratorQuota(store: NarratorStore, userId: string) {
+function narratorQuota(voices: NarratorVoice[]) {
   const today = localDay(new Date());
-  const madeToday = (kind: 'designed' | 'uploaded') => store.voices.filter((voice) => voice.userId === userId && voiceKind(voice) === kind && localDay(new Date(voice.createdAt)) === today).length;
+  const madeToday = (kind: 'designed' | 'uploaded') => voices.filter((voice) => voiceKind(voice) === kind && localDay(new Date(voice.createdAt)) === today).length;
   const usedToday = madeToday('designed');
   const uploadsToday = madeToday('uploaded');
   const resetsAt = new Date();
@@ -412,37 +412,15 @@ async function voiceUsage(who: Requester, voices: NarratorVoice[]): Promise<Voic
 function publicNarrator(voice: NarratorVoice, usage?: VoiceUsage) {
   return {
     id: voice.id, name: voice.name, description: voice.description, sampleText: voice.sampleText, createdAt: voice.createdAt,
-    kind: voiceKind(voice), previewPath: voice.previewKey, previewPending: Boolean(voice.previewPending),
+    kind: voice.kind, previewPath: voice.previewKey, previewPending: voice.previewPending,
     usedIn: usage?.get(voice.id) ?? [],
   };
 }
 
-// Narrators a signed-in user made through another machine's server are in Supabase and the shared bucket but not
-// in this server's store; they're added to it so they can be previewed and selected here too.
-async function adoptSupabaseNarrators(who: Requester) {
-  if (!who.signedIn) return;
-  const rows = await getNarratorVoices(who.id).catch((error: unknown) => {
-    app.log.warn({ error }, 'Could not read narrator voices from Supabase');
-    return [];
-  });
-  const store = await readNarratorStore();
-  const missing = rows.filter((row) => !store.voices.some((voice) => voice.id === row.voice_id));
-  if (!missing.length) return;
-  await updateNarratorStore((latest) => {
-    for (const row of missing) {
-      if (latest.voices.some((voice) => voice.id === row.voice_id)) continue;
-      latest.voices.push({ id: row.voice_id, userId: who.id, name: row.name, description: row.description, sampleText: row.sample_text, createdAt: row.created_at, referenceKey: row.reference_path, previewKey: row.preview_path, kind: row.voice_id.startsWith('upload_') ? 'uploaded' : 'designed' });
-      if (row.is_selected) latest.selected[who.id] ??= row.voice_id;
-    }
-  });
-}
-
 async function narratorState(who: Requester) {
-  await adoptSupabaseNarrators(who);
-  const store = await readNarratorStore();
-  const voices = store.voices.filter((voice) => canUseNarrator(voice, who)).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  const { voices, selectedId } = await myVoices(who);
   const usage = await voiceUsage(who, voices);
-  return { voices: voices.map((voice) => publicNarrator(voice, usage)), selectedId: selectedNarratorId(store, who) ?? null, previewModel: NARRATOR_PREVIEW_MODEL, ...narratorQuota(store, who.id) };
+  return { voices: voices.map((voice) => publicNarrator(voice, usage)), selectedId, previewModel: NARRATOR_PREVIEW_MODEL, ...narratorQuota(voices) };
 }
 
 async function speakWithVoice(model: string, voiceId: string, text: string) {
@@ -477,16 +455,10 @@ async function createNarratorVoice(who: Requester, input: z.infer<typeof narrato
   // Gemini's design sample is a long, neutral read, which makes the better IndexTTS cloning reference.
   await putBytes(referenceKey, Buffer.from(voice.sample_audio.data, 'base64'));
   await putBytes(previewKey, await speakWithVoice(NARRATOR_PREVIEW_MODEL, voice.id, sampleText));
-  const narrator: NarratorVoice = { id: voice.id, userId, name: input.name, description: input.description, sampleText, createdAt: new Date().toISOString(), referenceKey, previewKey, kind: 'designed' };
-  const selected = await updateNarratorStore((store) => {
-    store.voices.push(narrator);
-    store.selected[userId] ??= narrator.id;
-    return store.selected[userId] === narrator.id;
-  });
-  if (who.signedIn) {
-    await setNarratorVoice({ userId, voiceId: narrator.id, name: narrator.name, description: narrator.description, sampleText, referencePath: referenceKey, previewPath: previewKey, selected })
-      .catch((error: unknown) => app.log.warn({ error, voiceId: narrator.id }, 'Narrator saved to S3 but not recorded in Supabase'));
-  }
+  const narrator: NarratorVoice = { id: voice.id, userId, name: input.name, description: input.description, sampleText, createdAt: new Date().toISOString(), referenceKey, previewKey, kind: 'designed', previewPending: false };
+  // The reader's first voice becomes their narrator.
+  const selected = !(await myVoices(who)).selectedId;
+  await setNarratorVoice({ userId, voiceId: narrator.id, name: narrator.name, description: narrator.description, sampleText, referencePath: referenceKey, previewPath: previewKey, selected });
   return narrator;
 }
 
@@ -518,15 +490,9 @@ async function createUploadedVoice(who: Requester, input: { name: string; fileNa
       id, userId: who.id, name: input.name, description: `Cloned from your recording (${Math.round(seconds)} s).`, sampleText: DEFAULT_NARRATOR_SAMPLE,
       createdAt: new Date().toISOString(), referenceKey, previewKey, kind: 'uploaded', previewPending: true,
     };
-    const selected = await updateNarratorStore((store) => {
-      store.voices.push(narrator);
-      store.selected[who.id] ??= narrator.id;
-      return store.selected[who.id] === narrator.id;
-    });
-    if (who.signedIn) {
-      await setNarratorVoice({ userId: who.id, voiceId: id, name: narrator.name, description: narrator.description, sampleText: narrator.sampleText, referencePath: referenceKey, previewPath: previewKey, selected })
-        .catch((error: unknown) => app.log.warn({ error, voiceId: id }, 'Uploaded voice saved to S3 but not recorded in Supabase'));
-    }
+    const selected = !(await myVoices(who)).selectedId;
+    await setNarratorVoice({ userId: who.id, voiceId: id, name: narrator.name, description: narrator.description, sampleText: narrator.sampleText, referencePath: referenceKey, previewPath: previewKey, selected });
+    previewsPending.add(id);
     void renderNarratorPreview(narrator);
     return narrator;
   } finally {
@@ -545,25 +511,18 @@ async function renderNarratorPreview(voice: NarratorVoice) {
     const outputPath = await runIndexTts(referencePath, voice.sampleText, 'calm, even narration', calm, pacingFor(voice.sampleText, true));
     await putFile(voice.previewKey, outputPath);
     await rm(outputPath, { force: true });
-    await updateNarratorStore((store) => {
-      const entry = store.voices.find((item) => item.id === voice.id);
-      if (entry) entry.previewPending = false;
-    });
+    previewsPending.delete(voice.id);
     app.log.info({ voiceId: voice.id }, 'Uploaded voice preview rendered');
   } catch (error) {
     // The recording itself stays as the preview.
     app.log.warn({ voiceId: voice.id, error: error instanceof Error ? error.message : error }, 'Uploaded voice preview not rendered');
-    await updateNarratorStore((store) => {
-      const entry = store.voices.find((item) => item.id === voice.id);
-      if (entry) entry.previewPending = false;
-    }).catch(() => {});
+    previewsPending.delete(voice.id);
   }
 }
 
 async function selectedNarrator(who: Requester) {
-  const store = await readNarratorStore();
-  const selectedId = selectedNarratorId(store, who);
-  const voice = store.voices.find((item) => canUseNarrator(item, who) && item.id === selectedId);
+  const { voices, selectedId } = await myVoices(who);
+  const voice = voices.find((item) => item.id === selectedId);
   if (!voice) return undefined;
   const referencePath = await localCopy(voice.referenceKey);
   return referencePath ? { voice, referencePath } : undefined;
@@ -826,6 +785,33 @@ async function stitchSegments(jobId: string, segments: Array<{ path: string; gai
 const app = Fastify({ logger: true, bodyLimit: 50 * 1024 * 1024 });
 await app.register(cors, { origin: true, methods: ['GET', 'HEAD', 'POST', 'PUT', 'DELETE'] });
 await app.register(multipart, { limits: { fileSize: 50 * 1024 * 1024, files: 1 } });
+
+// Routes that spend money or model time (Claude, Gemini, IndexTTS) need a signed-in reader, so the server can't be
+// run up by anyone who can reach it. Checked here, in one place, before any route runs. The local voice playground
+// is a dev tool and also answers requests from this computer itself.
+const SIGNED_IN_ONLY = new Set([
+  'POST /api/books/process',
+  'POST /api/books/import',
+  'PUT /api/books/:jobId/cast',
+  'POST /api/books/:jobId/retry',
+  'POST /api/books/:jobId/renarrate',
+  'POST /api/voice/generate',
+  'POST /api/cleanup',
+  'GET /api/narrators',
+  'POST /api/narrators',
+  'POST /api/narrators/upload',
+  'PUT /api/narrators/selected',
+  'DELETE /api/narrators/:voiceId',
+]);
+const fromThisComputer = (ip: string) => ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1';
+app.addHook('preHandler', async (request, reply) => {
+  const route = `${request.method} ${request.routeOptions.url ?? ''}`;
+  const playground = request.method !== 'GET' && (request.routeOptions.url ?? '').startsWith('/api/playground/');
+  if (!SIGNED_IN_ONLY.has(route) && !playground) return;
+  if (playground && fromThisComputer(request.ip)) return;
+  if (await userFromAuthorization(request.headers.authorization).catch(() => undefined)) return;
+  return reply.code(401).send({ error: route.includes('/narrators') ? 'Sign in to use the Voice Studio.' : 'Sign in to do that. Narrating and making voices need an Echo account.' });
+});
 await mkdir(TMP_ROOT, { recursive: true });
 await mkdir(MODEL_OUTPUTS, { recursive: true });
 await initStorage(SERVER_ROOT);
@@ -1444,13 +1430,13 @@ app.put('/api/books/:jobId/cast', async (request, reply) => {
   if (running.has(jobId)) return reply.code(409).send({ error: 'This book is being narrated. Wait for it to finish, then change its voices.' });
   if (!state.castReady) return reply.code(409).send({ error: 'The cast isn\u2019t ready yet.' });
   const input = castChangeSchema.parse(request.body);
-  const store = await readNarratorStore();
+  const { voices: studio } = await myVoices(who);
   const changed = new Set<string>();
   for (const [name, choice] of Object.entries(input.voices)) {
     if (!state.roster?.characters.some((character) => character.name === name)) return reply.code(400).send({ error: `${name} isn\u2019t in this book\u2019s cast.` });
     let next: VoiceRef | undefined;
     if ('narratorId' in choice) {
-      const voice = store.voices.find((item) => item.id === choice.narratorId && canUseNarrator(item, who));
+      const voice = studio.find((item) => item.id === choice.narratorId);
       if (!voice) return reply.code(404).send({ error: 'That voice isn\u2019t in your studio.' });
       next = studioVoiceRef(voice);
     } else {
@@ -1570,10 +1556,15 @@ app.get('/api/books/:jobId/chapters/:index/timeline', async (request, reply) => 
   return { timeline: timelineCache.get(cacheKey) };
 });
 
-app.get('/api/narrators', async (request) => narratorState(await requester(request)));
+app.get('/api/narrators', async (request, reply) => {
+  const who = await requester(request);
+  if (needsAccount(who, reply)) return reply;
+  return narratorState(who);
+});
 
 app.post('/api/narrators', async (request, reply) => {
   const who = await requester(request);
+  if (needsAccount(who, reply)) return reply;
   const userId = who.id;
   try {
     ensureConfiguration();
@@ -1582,7 +1573,7 @@ app.post('/api/narrators', async (request, reply) => {
       return reply.code(400).send({ error: 'Narrator voices must be adults. Describe the sound instead (e.g. "light, bright, high-pitched young adult voice") without words like child, kid, boy, girl, or teen.' });
     }
     const inFlight = narratorCreationsInFlight.get(userId) ?? 0;
-    const { remainingToday } = narratorQuota(await readNarratorStore(), userId);
+    const { remainingToday } = narratorQuota((await myVoices(who)).voices);
     if (remainingToday - inFlight <= 0) {
       return reply.code(429).send({ error: `You can create ${NARRATOR_DAILY_LIMIT} narrator voices per day. Try again tomorrow.`, ...await narratorState(who) });
     }
@@ -1606,6 +1597,7 @@ app.post('/api/narrators', async (request, reply) => {
 // or has the speaker's permission), then the audio under `audio`.
 app.post('/api/narrators/upload', async (request, reply) => {
   const who = await requester(request);
+  if (needsAccount(who, reply)) return reply;
   try {
     const upload = await request.file({ limits: { fileSize: UPLOAD_MAX_BYTES } });
     if (!upload) return reply.code(400).send({ error: 'Attach a recording in the audio field.' });
@@ -1615,7 +1607,7 @@ app.post('/api/narrators/upload', async (request, reply) => {
     };
     const name = field('name').trim().slice(0, 40) || 'My voice';
     if (field('consent') !== 'true') return reply.code(400).send({ error: 'Confirm that this is your own recording, or that the speaker agreed to it being cloned.' });
-    const { uploadsRemainingToday } = narratorQuota(await readNarratorStore(), who.id);
+    const { uploadsRemainingToday } = narratorQuota((await myVoices(who)).voices);
     if (uploadsRemainingToday <= 0) return reply.code(429).send({ error: `You can upload ${UPLOAD_DAILY_LIMIT} recordings a day. Try again tomorrow.`, ...await narratorState(who) });
     const buffer = await upload.toBuffer();
     if (upload.file.truncated) return reply.code(400).send({ error: `Recordings can be up to ${UPLOAD_MAX_BYTES / 1024 / 1024} MB.` });
@@ -1633,35 +1625,27 @@ app.post('/api/narrators/upload', async (request, reply) => {
 app.delete('/api/narrators/:voiceId', async (request, reply) => {
   const { voiceId } = request.params as { voiceId: string };
   const who = await requester(request);
-  const voice = (await readNarratorStore()).voices.find((item) => item.id === voiceId && canUseNarrator(item, who));
+  if (needsAccount(who, reply)) return reply;
+  const voice = await findVoice(who, voiceId);
   if (!voice) return reply.code(404).send({ error: 'Voice not found.' });
   if (voice.previewPending) return reply.code(409).send({ error: 'This voice is still being prepared. Try again in a minute.' });
   const books = (await voiceUsage(who, [voice])).get(voiceId) ?? [];
   const narratingNow = [...running.values(), ...waitingBooks.values()].some((state) => Object.values(state.voices).some((ref) => ref.referenceKey === voice.referenceKey));
   if (books.length || narratingNow) return reply.code(409).send({ error: `${voice.name} is used by ${books.length ? books.map((book) => book.title).join(', ') : 'a book being narrated'}. Give those parts another voice first.` });
-  await updateNarratorStore((store) => {
-    store.voices = store.voices.filter((item) => item.id !== voiceId);
-    for (const [user, selected] of Object.entries(store.selected)) if (selected === voiceId) delete store.selected[user];
-  });
-  await deletePrefix(`narrators/${voice.userId}/${voice.id.replace(/[^a-zA-Z0-9_-]/g, '_')}/`).catch((error: unknown) => app.log.warn({ error, voiceId }, 'Voice files not removed'));
-  if (who.signedIn) await deleteNarratorVoice(voiceId).catch((error: unknown) => app.log.warn({ error, voiceId }, 'Voice row not removed from Supabase'));
+  await deleteNarratorVoice(voiceId);
+  // The clips sit together in the voice's folder (older voices were filed under the mock user's id, so it's taken
+  // from the row rather than rebuilt).
+  await deletePrefix(`${path.posix.dirname(voice.referenceKey)}/`).catch((error: unknown) => app.log.warn({ error, voiceId }, 'Voice files not removed'));
   app.log.info({ voiceId, userId: who.id }, 'Voice removed');
   return narratorState(who);
 });
 
 app.put('/api/narrators/selected', async (request, reply) => {
   const who = await requester(request);
+  if (needsAccount(who, reply)) return reply;
   const { voiceId } = z.object({ voiceId: z.string().min(1) }).parse(request.body);
-  const voice = await updateNarratorStore((store) => {
-    const match = store.voices.find((item) => canUseNarrator(item, who) && item.id === voiceId);
-    if (match) store.selected[who.id] = voiceId;
-    return match;
-  });
-  if (!voice) return reply.code(404).send({ error: 'Narrator voice not found.' });
-  // Test narrators belong to the mock user, who has no Supabase row, so only the user's own are recorded.
-  if (who.signedIn && voice.userId === who.id) {
-    await setSelectedNarrator(who.id, voiceId).catch((error: unknown) => app.log.warn({ error, voiceId }, 'Narrator selection not recorded in Supabase'));
-  }
+  if (!(await findVoice(who, voiceId))) return reply.code(404).send({ error: 'Narrator voice not found.' });
+  await setSelectedNarrator(who.id, voiceId);
   return narratorState(who);
 });
 
@@ -1693,8 +1677,8 @@ async function sendStoredAudio(request: { headers: Record<string, string | strin
 // headers on every platform); this route stays for tools that can.
 app.get('/api/narrators/:voiceId/audio', async (request, reply) => {
   const { voiceId } = request.params as { voiceId: string };
-  const voice = (await readNarratorStore()).voices.find((item) => item.id === voiceId);
-  if (!voice || !canUseNarrator(voice, await requester(request))) return reply.code(404).send({ error: 'Narrator voice not found.' });
+  const voice = await findVoice(await requester(request), voiceId);
+  if (!voice) return reply.code(404).send({ error: 'Narrator voice not found.' });
   return sendStoredAudio(request, reply, voice.previewKey);
 });
 
@@ -1748,8 +1732,7 @@ async function canReadFile(request: { headers: Record<string, string | string[] 
   const { expires, sig } = (request.query ?? {}) as { expires?: string; sig?: string };
   if (sig && expires && Number(expires) > Date.now() && sig === signMedia(key, Number(expires))) return true;
   if (bookId) return canReadBook(request, bookId);
-  const voice = (await readNarratorStore()).voices.find((item) => item.previewKey === key || item.referenceKey === key);
-  return Boolean(voice && canUseNarrator(voice, await requester(request)));
+  return (await myVoices(await requester(request))).voices.some((voice) => voice.previewKey === key || voice.referenceKey === key);
 }
 
 // Plays a path stored in a Supabase row (chapters.audio_s3_url, characters.voice_sample_path,

@@ -126,6 +126,9 @@ export default function BookDetailsScreen() {
     setCastSheet({ mode: result.awaitingCast ? 'review' : 'edit', cast: result.cast });
   }, () => {});
 
+  // A book opened from the Library's discover rail isn't in the reader's library: no chapters, no server actions.
+  const preview = !params.id || params.id.startsWith('discover-');
+  const isSample = mockBooks.some((b) => b.id === params.id);
   const preparing = book !== null && ['uploaded', 'queued', 'processing'].includes(book.status);
   const stillNarrating = preparing || chapters.some((c) => c.status === 'queued' || c.status === 'processing');
   useEffect(() => {
@@ -134,16 +137,16 @@ export default function BookDetailsScreen() {
     return () => clearInterval(timer);
   }, [stillNarrating, load]);
 
-  // A book opened without chapter rows (from the player, or a test book without any) still gets a list to browse;
-  // a book that's being prepared shows none until Echo has found its chapters.
+  // A sample book without chapter rows still gets a list to browse (it plays the simulated clock); a book that's
+  // being prepared, or a Library preview, shows none.
   const chapterList = useMemo<DisplayChapter[]>(
     () =>
       chapters.length
         ? chapters.map(toDisplay)
-        : preparing
+        : preparing || !isSample
           ? []
           : Array.from({ length: 12 }, (_, i) => ({ number: i + 1, title: `Chapter ${i + 1}`, durationSec: (16 + ((i * 7) % 11)) * 60, state: 'ready' as const, audioPath: null })),
-    [chapters, preparing]
+    [chapters, isSample, preparing]
   );
   const single = chapterList.length === 1;
   const ready = chapterList.filter((c) => c.state === 'ready');
@@ -226,11 +229,19 @@ export default function BookDetailsScreen() {
 
         <Reveal index={1} style={s.progressCard}>
           <View style={s.progressLabels}>
-            <Text style={type.meta}>{!current ? 'BEING NARRATED' : single ? 'FULL AUDIOBOOK' : `YOU'RE ON CHAPTER ${current.number}`}</Text>
+            <Text style={type.meta}>{preview ? 'NOT IN YOUR LIBRARY YET' : !current ? 'BEING NARRATED' : single ? 'FULL AUDIOBOOK' : `YOU'RE ON CHAPTER ${current.number}`}</Text>
             <Text style={[s.percent, { color: cover[1] }]}>{Math.round(progress)}%</Text>
           </View>
           <View style={s.track}><View style={[s.fill, { width: `${progress}%`, backgroundColor: cover[1] }]} /></View>
-          {awaitingCast ? (
+          {preview ? (
+            <>
+              <Pressable style={[s.continue, { backgroundColor: cover[1] }]} onPress={() => router.push('/Test/catalog')} accessibilityRole="button">
+                <Ionicons name="add" size={18} color="#18131E" />
+                <Text style={s.continueText}>Add it from Public Domain</Text>
+              </Pressable>
+              <Text style={type.meta}>Echo narrates it once it’s on your shelf, with a voice for every character.</Text>
+            </>
+          ) : awaitingCast ? (
             <>
               <Pressable style={[s.continue, { backgroundColor: colors.gold }]} onPress={() => setCastSheet({ mode: 'review', cast: awaitingCast })} accessibilityRole="button">
                 <Ionicons name="people" size={18} color="#18131E" />
@@ -265,7 +276,7 @@ export default function BookDetailsScreen() {
             )}
           </View>
           {chapterList.length === 0 ? (
-            <Text style={type.body}>Echo is reading the book and finding its chapters. They appear here as soon as narration starts.</Text>
+            <Text style={type.body}>{preview ? 'Chapters appear here once the book is on your shelf and narrated.' : 'Echo is reading the book and finding its chapters. They appear here as soon as narration starts.'}</Text>
           ) : (
             <View style={s.chapterCard}>
               {visible.map((chapter, i) => {
@@ -302,7 +313,7 @@ export default function BookDetailsScreen() {
             </View>
           </View>
           {people.length === 0 ? (
-            <Text style={[type.body, { marginTop: 4 }]}>Characters appear here once Echo has read the book.</Text>
+            <Text style={[type.body, { marginTop: 4 }]}>{preview ? 'Echo finds the characters and gives each a voice when it narrates the book.' : 'Characters appear here once Echo has read the book.'}</Text>
           ) : (
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 12, paddingRight: 20 }}>
               {people.map((p) => (
@@ -320,7 +331,7 @@ export default function BookDetailsScreen() {
       </ScrollView>
 
       <Sheet visible={menu} onClose={() => setMenu(false)} title={title}>
-        <SheetItem icon="play-skip-back-outline" label="Play from the beginning" onPress={() => { setMenu(false); play(ready[0]); }} />
+        {ready.length > 0 && <SheetItem icon="play-skip-back-outline" label="Play from the beginning" onPress={() => { setMenu(false); play(ready[0]); }} />}
         <SheetItem icon="mic-outline" label="Voice Studio" detail="Design or record voices" onPress={() => { setMenu(false); router.push('/voice-studio'); }} />
         {ownBook && params.id && !narratorOnly && (awaitingCast || !stillNarrating) && (
           <SheetItem icon="people-outline" label={awaitingCast ? 'Meet the cast' : 'Change the voices'} detail={awaitingCast ? 'Approve the voices' : 'Any part, any voice'} onPress={changeVoices} />
@@ -329,7 +340,7 @@ export default function BookDetailsScreen() {
           <SheetItem icon="sync-outline" label="Re-narrate with my narrator" detail="Reads every chapter again" onPress={() => act('Couldn\u2019t re-narrate', () => renarrateBook(params.id!))} />
         )}
         <SheetItem icon="share-outline" label="Share" onPress={() => { setMenu(false); Share.share({ message: `I'm listening to ${title} by ${author} on Echo.` }).catch(() => {}); }} />
-        <SheetItem icon="trash-outline" label="Remove from library" danger onPress={() => { setMenu(false); ownBook ? setConfirmRemove(true) : notify('Test book', 'Sample books can\u2019t be removed.'); }} />
+        {!preview && <SheetItem icon="trash-outline" label="Remove from library" danger onPress={() => { setMenu(false); ownBook ? setConfirmRemove(true) : notify('Test book', 'Sample books can\u2019t be removed.'); }} />}
       </Sheet>
 
       <Sheet visible={confirmRemove} onClose={() => setConfirmRemove(false)} title={`Remove ${title}?`}>

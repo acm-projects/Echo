@@ -1,11 +1,14 @@
+import { useCallback, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { notify } from '../../../../lib/notify';
 import { Ionicons } from '@expo/vector-icons';
+import { useFocusEffect, useRouter, type Href } from 'expo-router';
+import Constants from 'expo-constants';
+import { notify } from '../../../../lib/notify';
 import { Screen } from '../../../components/Screen';
 import { colors, fonts, type } from '../../../../theme';
-import { useRouter, type Href } from 'expo-router';
 import { supabase } from '../../../../lib/supabase';
-import { useState, useEffect } from 'react';
+import { getMyBooks, getMyStreak } from '../../../data';
+
 type Icon = keyof typeof Ionicons.glyphMap;
 const ROWS: { icon: Icon; label: string; href: Href }[] = [
   { icon: 'download-outline', label: 'Downloads', href: '/Test/downloads' },
@@ -14,56 +17,40 @@ const ROWS: { icon: Icon; label: string; href: Href }[] = [
   { icon: 'help-circle-outline', label: 'Help & support', href: '/Test/help' },
 ];
 
+// Whole hours listened, from the streak's running total; under an hour shows as "<1".
+const hoursLabel = (seconds: number) => (seconds < 3600 ? (seconds > 0 ? '<1' : '0') : String(Math.floor(seconds / 3600)));
+
 export default function Profile() {
   const router = useRouter();
   const [user, setUser] = useState('');
   const [email, setEmail] = useState('');
+  const [stats, setStats] = useState<{ books: number; hours: string; streak: number } | null>(null);
+
+  // Reloaded each time the tab is shown, so a book finished or a chapter listened to elsewhere counts straight away.
+  useFocusEffect(useCallback(() => {
+    let active = true;
+    supabase.auth.getSession().then(({ data }) => {
+      if (!active) return;
+      const account = data.session?.user;
+      setUser(account?.user_metadata?.username ?? account?.email?.split('@')[0] ?? '');
+      setEmail(account?.email ?? '');
+    }).catch(() => {});
+    Promise.all([getMyBooks(), getMyStreak()]).then(([books, streak]) => {
+      if (active) setStats({ books: books.length, hours: hoursLabel(streak?.total_listen_seconds ?? 0), streak: streak?.current_streak ?? 0 });
+    }).catch(() => { if (active) setStats({ books: 0, hours: '0', streak: 0 }); });
+    return () => { active = false; };
+  }, []));
 
   const handleSignOut = async () => {
     const { error } = await supabase.auth.signOut();
-
     if (error) {
       notify('Sign out failed', error.message);
       return;
     }
-
     router.replace('/Test/welcome');
   };
-  const getUser = async () => {
-    const { data: { user }, error } = await supabase.auth.getUser();
-    if (error || !user) {
-      notify('Failed to fetch user', error?.message || 'User not found');
-      return;
-    }
-    else{
-      return (user?.user_metadata?.username);
-    }
-  };
 
-  const getEmail = async () => {
-    const { data: { user }, error } = await supabase.auth.getUser();
-    if (error || !user) {
-      notify('Failed to fetch user', error?.message || 'User not found');
-      return;
-    }
-    else{
-      return (user?.user_metadata?.email);
-    }
-  };
-  useEffect(() => {
-    const loadUser = async () => {
-      const username = await getUser();
-      const email = await getEmail();
-      if (username) {
-        setUser(username);
-      }
-      if (email) {
-        setEmail(email);
-      }
-    };
-    loadUser();
-  }, []);
-
+  const version = Constants.expoConfig?.version ?? '1.0.0';
 
   return (
     <Screen>
@@ -72,21 +59,20 @@ export default function Profile() {
 
         <View style={{ alignItems: 'center', marginVertical: 24, gap: 6 }}>
           <View style={s.avatar}>
-            <Text
-              style={{
-                fontFamily: fonts.sansBold,
-                fontSize: 30,
-                color: colors.dim,
-              }}>
+            <Text style={{ fontFamily: fonts.sansBold, fontSize: 30, color: colors.dim }}>
               {user.trim().charAt(0).toUpperCase() || '?'}
             </Text>
           </View>
-          <Text style={{ fontFamily: fonts.serif, fontSize: 26, color: colors.text }}>{user}</Text>
-          <Text style={type.body}>{email}</Text>
+          <Text style={{ fontFamily: fonts.serif, fontSize: 26, color: colors.text }}>{user || 'Night listener'}</Text>
+          <Text style={type.body}>{email || 'Not signed in'}</Text>
         </View>
 
         <View style={s.stats}>
-          {[['12', 'Books'], ['148', 'Hours'], ['8', 'Day streak']].map(([n, l], i) => (
+          {[
+            [stats ? String(stats.books) : '–', 'Books'],
+            [stats ? stats.hours : '–', 'Hours'],
+            [stats ? String(stats.streak) : '–', 'Day streak'],
+          ].map(([n, l], i) => (
             <View key={l} style={[s.stat, i > 0 && s.divider]}>
               <Text style={{ fontFamily: fonts.sansBold, fontSize: 28, color: colors.text }}>{n}</Text>
               <Text style={type.meta}>{l}</Text>
@@ -98,7 +84,7 @@ export default function Profile() {
           {ROWS.map((r) => <Row key={r.label} icon={r.icon} label={r.label} onPress={() => router.push(r.href)} />)}
           <Row icon="log-out-outline" label="Sign out" danger last onPress={handleSignOut} />
         </View>
-        <Text style={[type.meta, { textAlign: 'center', marginTop: 20 }]}>Echo 2.4.0</Text>
+        <Text style={[type.meta, { textAlign: 'center', marginTop: 20 }]}>Echo {version}</Text>
       </ScrollView>
     </Screen>
   );
@@ -106,7 +92,7 @@ export default function Profile() {
 
 function Row({ icon, label, danger, last, onPress }: { icon: Icon; label: string; danger?: boolean; last?: boolean; onPress: () => void }) {
   return (
-    <Pressable style={[s.row, !last && s.rowLine]} onPress={onPress}>
+    <Pressable style={[s.row, !last && s.rowLine]} onPress={onPress} accessibilityRole="button">
       <View style={s.rowIcon}><Ionicons name={icon} size={20} color={danger ? colors.danger : colors.blue} /></View>
       <Text style={{ flex: 1, fontFamily: fonts.sansMd, fontSize: 16, color: danger ? colors.danger : colors.text }}>{label}</Text>
       {!danger && <Ionicons name="chevron-forward" size={18} color={colors.faint} />}

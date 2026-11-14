@@ -5,8 +5,8 @@ import { mediaUrl, VOICE_SERVER_URL, voiceServerHeaders } from './voiceServer';
 export { VOICE_SERVER_URL };
 
 // The reader's voices, from the voice server: ones Gemini designed from a description and ones cloned from a recording
-// they uploaded. Signed-in users' voices are also recorded in Supabase's narrator_voices; the test narrators made under
-// the mock user show up alongside them.
+// they uploaded. They're kept in Supabase's narrator_voices with the account, so the studio needs a signed-in reader
+// (the server answers 401 otherwise).
 
 export type VoiceUse = { bookId: string; title: string; as: string[] };
 
