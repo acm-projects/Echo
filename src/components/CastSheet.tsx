@@ -7,6 +7,7 @@ import { Sheet } from './Sheet';
 import { colors, fonts, type } from '../../theme';
 import { getNarrators, narratorPreviewUrl, setBookCast, type CastChoice, type CastMember, type NarratorVoice } from '../data/narrators';
 import { mediaUrl } from '../data/voiceServer';
+import { confirm } from '../../lib/notify';
 
 // Every character gets their own colour, the same ones Book Details uses, so the cast reads the same everywhere.
 const CAST_COLORS = ['#FF9A7A', '#62E6F0', '#FFB45E', '#B79CFF', '#7CF2B8', '#FF6FD0', '#9CC2FF'];
@@ -24,13 +25,15 @@ type Props = {
   onDone: () => void;
   // Leave for the Voice Studio to make a new voice; the caller closes the sheet first, and reopens it on return.
   onOpenStudio: () => void;
+  // Review only: deletes the whole book (source, voices, audio and its place in the library). Resolves once it's gone.
+  onDelete?: () => Promise<void>;
 };
 
 /**
  * The cast of a book with the voice each one is read with: hear each voice, give a character one of the reader's
  * studio voices instead (or the voice designed for them), and start or restart narration.
  */
-export function CastSheet({ visible, bookId, title, cast, mode, onClose, onDone, onOpenStudio }: Props) {
+export function CastSheet({ visible, bookId, title, cast, mode, onClose, onDone, onOpenStudio, onDelete }: Props) {
   const player = useAudioPlayer(null);
   const status = useAudioPlayerStatus(player);
   const [voices, setVoices] = useState<NarratorVoice[]>([]);
@@ -112,6 +115,20 @@ export function CastSheet({ visible, bookId, title, cast, mode, onClose, onDone,
     } catch (err) {
       setError(err instanceof Error ? err.message : 'The voice server didn’t respond.');
     } finally {
+      setBusy(false);
+    }
+  };
+
+  const remove = async () => {
+    if (busy || !onDelete) return;
+    stop();
+    if (!(await confirm(`Delete ${title}?`, 'The book, its voices and any narration are deleted for good.', 'Delete'))) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await onDelete();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'The voice server didn\u2019t respond.');
       setBusy(false);
     }
   };
@@ -201,6 +218,12 @@ export function CastSheet({ visible, bookId, title, cast, mode, onClose, onDone,
         </Text>
       </Pressable>
       {mode === 'review' && <Text style={s.note}>You can change voices later from the book’s menu.</Text>}
+      {mode === 'review' && onDelete && (
+        <Pressable style={s.delete} onPress={remove} disabled={busy} accessibilityRole="button" hitSlop={6}>
+          <Ionicons name="trash-outline" size={16} color={colors.danger} />
+          <Text style={s.deleteText}>Delete this book instead</Text>
+        </Pressable>
+      )}
     </Sheet>
   );
 }
@@ -241,4 +264,6 @@ const s = StyleSheet.create({
   primaryText: { fontFamily: fonts.sansBold, fontSize: 15, color: '#18131E' },
   disabled: { opacity: 0.5 },
   note: { ...type.meta, textAlign: 'center', marginTop: 10, color: colors.dim },
+  delete: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, marginTop: 14, paddingVertical: 8 },
+  deleteText: { fontFamily: fonts.sansBold, fontSize: 14, color: colors.danger },
 });

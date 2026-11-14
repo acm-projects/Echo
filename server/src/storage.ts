@@ -153,6 +153,17 @@ export async function listKeys(prefix: string) {
   return keys;
 }
 
+/** Deletes single stored objects (and their local copies). Missing ones are fine. */
+export async function deleteKeys(keys: string[]) {
+  if (!keys.length) return;
+  await Promise.all(keys.map((key) => rm(cachePath(key), { force: true }).catch(() => {})));
+  if (!s3) {
+    await Promise.all(keys.map((key) => rm(localPath(key), { force: true })));
+    return;
+  }
+  await s3.send(new DeleteObjectsCommand({ Bucket: BUCKET, Delete: { Objects: keys.map((Key) => ({ Key })), Quiet: true } }));
+}
+
 export async function deletePrefix(prefix: string) {
   if (!prefix.endsWith('/')) throw new Error('deletePrefix needs a folder prefix ending in /.');
   if (!s3) {

@@ -180,6 +180,12 @@ export async function setChapterStatus(bookId: string, index: number, status: 'q
   await run('setChapterStatus', db.from('chapters').update({ status, processing_error: error?.slice(0, 2000) ?? null }).eq('book_id', bookId).eq('chapter_index', index));
 }
 
+/** Narration was stopped: every chapter waits again, with no audio. */
+export async function resetChapterAudio(bookId: string) {
+  if (!db) return;
+  await run('resetChapterAudio', db.from('chapters').update({ status: 'queued', processing_error: null, audio_s3_url: null, audio_duration_ms: null, audio_size_bytes: null, audio_format: null }).eq('book_id', bookId));
+}
+
 export async function setChapterAudio(bookId: string, chapter: { index: number; title?: string; audioPath: string; durationMs: number; sizeBytes: number; wordCount: number }) {
   if (!db) return;
   await run('setChapterAudio', db.from('chapters').upsert({

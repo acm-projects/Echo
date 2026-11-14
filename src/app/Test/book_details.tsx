@@ -11,10 +11,10 @@ import { colors, fonts, type } from '../../../theme';
 import { getBook, getBookChapters, getBookCharacters, getBookProgress } from '../../data';
 import type { Book, Chapter, Character, UserProgress } from '../../data/types';
 import { playback, type QueuedChapter } from '../../data/playback';
-import { getBookJob, removeBook, renarrateBook, retryBook } from '../../data/bookJobs';
+import { getBookJob, removeBook, renarrateBook, retryBook, stopBook } from '../../data/bookJobs';
 import { getBookCast, type CastMember } from '../../data/narrators';
 import { markChaptersSeen, notifyChapterReady } from '../../data/notifications';
-import { notify } from '../../../lib/notify';
+import { confirm, notify } from '../../../lib/notify';
 import { mockBooks } from '../../mock/books';
 
 // Every character gets their own colour, used on their card and wherever they appear, so the cast is easy to tell apart.
@@ -74,6 +74,7 @@ export default function BookDetailsScreen() {
   const [record, setRecord] = useState<UserProgress | null>(null);
   const [confirmRemove, setConfirmRemove] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [stopping, setStopping] = useState(false);
   // The book's cast with its voices: shown for approval before narration starts, and for changes afterwards.
   const [castSheet, setCastSheet] = useState<{ mode: 'review' | 'edit'; cast: CastMember[] } | null>(null);
   const [awaitingCast, setAwaitingCast] = useState<CastMember[] | null>(null);
@@ -196,6 +197,35 @@ export default function BookDetailsScreen() {
     }
   };
 
+  // Stop deletes the narration made so far and brings back Meet the cast, where the reader can start again with other
+  // voices or delete the book.
+  const stopNarration = async () => {
+    setMenu(false);
+    if (!params.id || stopping) return;
+    if (!(await confirm('Stop narrating?', 'The audio made so far is deleted and you go back to Meet the cast. The voices are kept, and you can start again or delete the book.', 'Stop'))) return;
+    setStopping(true);
+    try {
+      const result = await stopBook(params.id);
+      if (result.awaitingCast) {
+        setAwaitingCast(result.cast);
+        setCastSheet({ mode: 'review', cast: result.cast });
+      } else {
+        notify('Stopping after the voices', 'Echo is still making the cast\u2019s voices. Meet the cast appears here when they\u2019re ready, and narration won\u2019t start until you approve it.');
+      }
+      load();
+    } catch (error) {
+      notify('Couldn\u2019t stop narration', error instanceof Error ? error.message : 'The voice server didn\u2019t respond.');
+    } finally {
+      setStopping(false);
+    }
+  };
+
+  const deleteFromCast = async () => {
+    await removeBook(params.id!);
+    setCastSheet(null);
+    router.canGoBack() ? router.back() : router.replace('/Test/library');
+  };
+
   const toggleChapters = () => {
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
     setShowAll(!showAll);
@@ -263,6 +293,12 @@ export default function BookDetailsScreen() {
           )}
           {stillNarrating && !awaitingCast && current && (
             <Text style={type.meta}>{ready.length} of {chapterList.length} chapters ready{narratingNow ? ` \u00b7 narrating ${narratingNow.title}` : ''}. New chapters appear here as they finish.</Text>
+          )}
+          {stillNarrating && !awaitingCast && ownBook && params.id && (
+            <Pressable style={s.retry} onPress={stopNarration} disabled={stopping} accessibilityRole="button">
+              <Ionicons name="stop-circle-outline" size={16} color={colors.danger} />
+              <Text style={[s.retryText, { color: colors.danger }]}>{stopping ? 'Stopping at the end of this line\u2026' : 'Stop narration'}</Text>
+            </Pressable>
           )}
         </Reveal>
 
@@ -336,6 +372,9 @@ export default function BookDetailsScreen() {
         {ownBook && params.id && !narratorOnly && (awaitingCast || !stillNarrating) && (
           <SheetItem icon="people-outline" label={awaitingCast ? 'Meet the cast' : 'Change the voices'} detail={awaitingCast ? 'Approve the voices' : 'Any part, any voice'} onPress={changeVoices} />
         )}
+        {ownBook && params.id && stillNarrating && !awaitingCast && (
+          <SheetItem icon="stop-circle-outline" label="Stop narration" detail="Back to Meet the cast" onPress={stopNarration} />
+        )}
         {ownBook && params.id && !stillNarrating && (
           <SheetItem icon="sync-outline" label="Re-narrate with my narrator" detail="Reads every chapter again" onPress={() => act('Couldn\u2019t re-narrate', () => renarrateBook(params.id!))} />
         )}
@@ -359,6 +398,7 @@ export default function BookDetailsScreen() {
           onClose={() => setCastSheet(null)}
           onDone={() => { setCastSheet(null); setAwaitingCast(null); load(); }}
           onOpenStudio={openStudio}
+          onDelete={castSheet.mode === 'review' && ownBook ? deleteFromCast : undefined}
         />
       )}
 

@@ -67,6 +67,13 @@ export const getBookJob = async (bookId: string) => readJson<BookJob>(await fetc
 /** Removes a book the reader made: its audio and files on the server, and the book from their library. */
 export const removeBook = (bookId: string) => bookAction<{ removed: boolean }>('DELETE', `/api/books/${bookId}`);
 
+/**
+ * Stops narration: the audio made so far is deleted and the book waits at Meet the cast again, keeping its voices.
+ * Resolves once narration has halted. Before the voices are ready it can't stop yet (stopped: false); the book then
+ * waits at the cast instead of starting to narrate.
+ */
+export const stopBook = (bookId: string) => bookAction<{ stopped: boolean; awaitingCast: boolean; cast: CastMember[] }>('POST', `/api/books/${bookId}/stop`);
+
 /** Narrates again every chapter that failed or never ran, keeping the cast, voices and Claude's scene splits. */
 export const retryBook = (bookId: string) => bookAction<{ retried: number }>('POST', `/api/books/${bookId}/retry`);
 

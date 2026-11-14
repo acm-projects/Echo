@@ -13,8 +13,8 @@ import { z } from 'zod';
 import Anthropic from '@anthropic-ai/sdk';
 import { zodOutputFormat } from '@anthropic-ai/sdk/helpers/zod';
 import { chunkText, extractBook, gutenbergBook, wordCount, type ExtractedBook } from './book-text.js';
-import { clearLocalCopies, deletePrefix, dropLocalCopies, initStorage, listKeys, localCopy, playbackSource, putBytes, putBytesKeepingLocal, putFile, readText, storageMode } from './storage.js';
-import { dbMode, deleteNarratorVoice, failInterruptedBooks, getBookOwner, getStaleBookIds, getNarratorVoices, getVoiceUsage, initDb, setBookCast, setBookChapters, setBookDeleted, setBookFailed, setBookProcessing, setBookQueued, setBookReady, setBookSource, setChapterAudio, setChapterStatus, setCharacterVoice, setNarratorSample, setNarratorVoice, setSelectedNarrator, touchBook, userFromAuthorization } from './db.js';
+import { clearLocalCopies, deleteKeys, deletePrefix, dropLocalCopies, initStorage, listKeys, localCopy, playbackSource, putBytes, putBytesKeepingLocal, putFile, readText, storageMode } from './storage.js';
+import { dbMode, deleteNarratorVoice, failInterruptedBooks, resetChapterAudio, getBookOwner, getStaleBookIds, getNarratorVoices, getVoiceUsage, initDb, setBookCast, setBookChapters, setBookDeleted, setBookFailed, setBookProcessing, setBookQueued, setBookReady, setBookSource, setChapterAudio, setChapterStatus, setCharacterVoice, setNarratorSample, setNarratorVoice, setSelectedNarrator, touchBook, userFromAuthorization } from './db.js';
 
 const SERVER_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const REPO_ROOT = path.resolve(SERVER_ROOT, '..');
@@ -947,6 +947,10 @@ type JobState = {
 // removed mid-narration (their run stops at the next line).
 const running = new Map<string, JobState>();
 const cancelled = new Set<string>();
+// Books whose reader pressed Stop: the run ends at the next line and the book goes back to its cast review.
+const stopping = new Set<string>();
+// Settles when a book's run ends, so a stop can answer once narration has actually halted.
+const runDone = new Map<string, Promise<void>>();
 // Books whose voices are made and wait for the reader's approval. Kept in memory so a cast change edits the same state
 // the (still running) scene splitting writes to, and the approval carries it on without reloading.
 const waitingBooks = new Map<string, JobState>();
@@ -1074,6 +1078,8 @@ async function runBook(state: JobState, sourceBuffer?: Buffer) {
   if (running.has(jobId)) return;
   running.set(jobId, state);
   waitingBooks.delete(jobId);
+  let finishRun!: () => void;
+  runDone.set(jobId, new Promise<void>((resolve) => { finishRun = resolve; }));
   const folder = bookFolder(jobId);
   const who: Requester = { id: state.userId, testId: state.testId, signedIn: state.signedIn };
   const multi = state.chapters.length > 1;
@@ -1081,6 +1087,7 @@ async function runBook(state: JobState, sourceBuffer?: Buffer) {
   const lineAudioUser = (index: number) => `${jobId}:${index}`;
   const checkCancelled = () => {
     if (cancelled.has(jobId)) throw new Error('The book was removed.');
+    if (stopping.has(jobId)) throw new Error('Narration was stopped.');
   };
   const save = async () => {
     if (!cancelled.has(jobId)) await putBytes(jobStateKey(jobId), JSON.stringify(state));
@@ -1307,7 +1314,7 @@ async function runBook(state: JobState, sourceBuffer?: Buffer) {
         await releaseLineAudio(lineAudioUser(chapter.index), true);
         app.log.info({ jobId, chapter: chapter.index, audioKey, durationMs }, 'Chapter ready');
       } catch (error) {
-        if (cancelled.has(jobId)) throw error;
+        if (cancelled.has(jobId) || stopping.has(jobId)) throw error;
         // One chapter failing (a refusal, say) leaves the others listenable.
         const message = error instanceof Error ? error.message : 'Chapter narration failed.';
         app.log.error({ error, message, jobId, chapter: chapter.index }, 'Chapter failed');
@@ -1337,6 +1344,7 @@ async function runBook(state: JobState, sourceBuffer?: Buffer) {
       app.log.info({ jobId }, 'Narration stopped: the book was removed');
       return;
     }
+    if (stopping.has(jobId)) return; // Put back at the cast review in finally, once the run has let go.
     const message = error instanceof Error ? error.message : 'Book processing failed.';
     app.log.error({ error, message, jobId }, 'Book processing failed');
     for (const chapter of state.chapters) if (chapter.status === 'processing') Object.assign(chapter, { status: 'failed', error: message });
@@ -1350,7 +1358,8 @@ async function runBook(state: JobState, sourceBuffer?: Buffer) {
   } finally {
     clearInterval(heartbeat);
     running.delete(jobId);
-    for (const chapter of state.chapters) await releaseLineAudio(lineAudioUser(chapter.index), cancelled.has(jobId)).catch(() => {});
+    const stopped = stopping.has(jobId) && !cancelled.has(jobId);
+    for (const chapter of state.chapters) await releaseLineAudio(lineAudioUser(chapter.index), cancelled.has(jobId) || stopped).catch(() => {});
     // Local copies of the voices this book used, unless another book narrating here still reads them (a shared
     // narrator). Everything is in storage, and a retry downloads what it needs again.
     const stillUsed = new Set([...running.values()].flatMap((other) => Object.values(other.voices).map((voice) => voice.referenceKey)));
@@ -1361,7 +1370,36 @@ async function runBook(state: JobState, sourceBuffer?: Buffer) {
       await deletePrefix(activeMarkerFolder(jobId)).catch(() => {});
       cancelled.delete(jobId);
     }
+    stopping.delete(jobId);
+    // A book that finished in the moment Stop was pressed stays finished.
+    if (stopped && state.status !== 'done') await returnToCast(state).catch((error: unknown) => app.log.error({ error, jobId }, 'Could not put the stopped book back at its cast'));
+    runDone.delete(jobId);
+    finishRun();
   }
+}
+
+// After Stop: the narrated audio is deleted (chapter MP3s, the manifest, line audio), every chapter waits again, and
+// the book waits at its cast review. The source, the cast's voices and Claude's scene splits stay, so starting again
+// doesn't pay for them twice, and removing the book deletes everything.
+async function returnToCast(state: JobState) {
+  const { jobId } = state;
+  const folder = bookFolder(jobId);
+  await deletePrefix(`${folder}/chapters/`);
+  await deleteKeys([`${folder}/audio.mp3`, `${folder}/manifest.json`]);
+  await deletePrefix(activeMarkerFolder(jobId)).catch(() => {});
+  for (const chapter of state.chapters) {
+    Object.assign(chapter, { status: 'queued', audioKey: undefined, durationMs: undefined, error: undefined });
+    timelineCache.delete(`${jobId}:${chapter.index}`);
+  }
+  Object.assign(state, { narrated: {}, status: 'processing', error: undefined, reviewCast: true, castApproved: false });
+  await putBytes(jobStateKey(jobId), JSON.stringify(state));
+  if (state.signedIn) {
+    await setBookQueued(jobId).catch((error: unknown) => app.log.warn({ error, jobId }, 'Stopped book not marked queued in Supabase'));
+    await resetChapterAudio(jobId).catch((error: unknown) => app.log.warn({ error, jobId }, 'Stopped book chapters not reset in Supabase'));
+  }
+  publishJob(state, { stage: 'Review the cast', result: undefined });
+  waitingBooks.set(jobId, state);
+  app.log.info({ jobId }, 'Narration stopped: back at the cast review');
 }
 
 function readCharacterVoices(fields: Record<string, unknown> | undefined) {
@@ -1560,6 +1598,33 @@ app.post('/api/books/:jobId/renarrate', async (request, reply) => {
   return reply.code(202).send({ jobId, status: 'processing' });
 });
 
+// Stops narration and takes the book back to its cast review (see returnToCast). Answers once narration has halted,
+// which is at the end of the line being read. A book still reading or designing voices just waits at the cast instead
+// of starting to narrate on its own.
+app.post('/api/books/:jobId/stop', async (request, reply) => {
+  const { jobId } = request.params as { jobId: string };
+  const who = await requester(request);
+  const live = running.get(jobId);
+  if (!live) {
+    const saved = await ownedJob(jobId, who);
+    if (!saved) return reply.code(404).send({ error: 'Book not found.' });
+    if (awaitingCast(saved)) return { stopped: true, awaitingCast: true, cast: castOf(saved) };
+    return reply.code(409).send({ error: 'This book isn\u2019t being narrated.' });
+  }
+  if (!isOwner({ userId: live.userId, account: live.signedIn }, who)) return reply.code(404).send({ error: 'Book not found.' });
+  live.reviewCast = true;
+  live.castApproved = false;
+  if (!live.castReady) {
+    app.log.info({ jobId }, 'Stop pressed before the cast was ready: the book will wait at its cast review');
+    return reply.code(202).send({ stopped: false, awaitingCast: false, cast: [] });
+  }
+  stopping.add(jobId);
+  app.log.info({ jobId }, 'Stopping narration');
+  await Promise.race([runDone.get(jobId), new Promise((resolve) => setTimeout(resolve, 120_000))]);
+  const state = waitingBooks.get(jobId) ?? live;
+  return { stopped: !running.has(jobId), awaitingCast: awaitingCast(state), cast: castOf(state) };
+});
+
 // Removes a book: its stored files, its job state, and (soft-deleted) its Supabase row. Narration in progress stops.
 app.delete('/api/books/:jobId', async (request, reply) => {
   const { jobId } = request.params as { jobId: string };
@@ -1569,6 +1634,7 @@ app.delete('/api/books/:jobId', async (request, reply) => {
   if (running.has(jobId)) cancelled.add(jobId);
   await deletePrefix(`${bookFolder(jobId)}/`);
   await deletePrefix(activeMarkerFolder(jobId)).catch(() => {});
+  if (!running.has(jobId)) await dropLocalCopies([`${bookFolder(jobId)}/`]).catch(() => {});
   await setBookDeleted(jobId).catch((error: unknown) => app.log.warn({ error, jobId }, 'Could not mark the book deleted in Supabase'));
   bookJobs.delete(jobId);
   waitingBooks.delete(jobId);

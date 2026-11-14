@@ -7,8 +7,8 @@ import { router, useFocusEffect } from 'expo-router';
 import { Screen } from '../../components/Screen';
 import { colors, fonts, type } from '../../../theme';
 import { getNarrators } from '../../data/narrators';
-import { processBook, type BookJob } from '../../data/bookJobs';
-import { notify } from '../../../lib/notify';
+import { processBook, removeBook, stopBook, type BookJob } from '../../data/bookJobs';
+import { confirm, notify } from '../../../lib/notify';
 import { notifyChapterReady } from '../../data/notifications';
 import { Sheet } from '../../components/Sheet';
 import { ClassicSheet } from '../../components/ClassicSheet';
@@ -46,6 +46,9 @@ export default function Upload() {
   const [castOpen, setCastOpen] = useState(false);
   const reviewedJob = useRef<string | null>(null);
   const reopenCast = useRef(false);
+  const [stopping, setStopping] = useState(false);
+  // A book deleted from Meet the cast: its job disappears, which isn't an upload failure.
+  const removedJob = useRef<string | null>(null);
 
   useFocusEffect(useCallback(() => {
     getNarrators()
@@ -61,6 +64,39 @@ export default function Upload() {
     reopenCast.current = true;
     setCastOpen(false);
     router.push('/voice-studio');
+  };
+
+  // Stop deletes the narration made so far and brings back Meet the cast (start again, or delete the book).
+  const stopNarration = async () => {
+    if (!job || stopping) return;
+    if (!(await confirm('Stop narrating?', 'The audio made so far is deleted and you go back to Meet the cast. The voices are kept, and you can start again or delete the book.', 'Stop'))) return;
+    setStopping(true);
+    try {
+      const result = await stopBook(job.jobId);
+      if (result.awaitingCast) {
+        setJob((current) => (current ? { ...current, awaitingCast: true, cast: result.cast, stage: 'Review the cast', chapters: current.chapters?.map((chapter) => ({ ...chapter, status: 'queued' as const })) } : current));
+        setCastOpen(true);
+      } else {
+        notify('Stopping after the voices', 'Echo is still making the cast\u2019s voices. Meet the cast opens when they\u2019re ready, and narration won\u2019t start until you approve it.');
+        reviewedJob.current = null;
+      }
+    } catch (error) {
+      notify('Couldn\u2019t stop narration', error instanceof Error ? error.message : 'The voice server didn\u2019t respond.');
+    } finally {
+      setStopping(false);
+    }
+  };
+
+  const deleteBook = async () => {
+    if (!job) return;
+    removedJob.current = job.jobId;
+    await removeBook(job.jobId).catch((error) => {
+      removedJob.current = null;
+      throw error;
+    });
+    setCastOpen(false);
+    setJob(null);
+    notify('Book deleted', 'The book and everything made for it are gone.');
   };
 
   const openJob = (current: BookJob) => {
@@ -102,8 +138,13 @@ export default function Upload() {
       const reader = settings.characterVoices ? `with ${voices} voices` : 'by your narrator';
       notify('Book ready', `${summary} ${reader}.${finished.error ? ` ${finished.error}` : ''}`);
     } catch (error) {
-      notify('Upload failed', error instanceof Error ? error.message : 'Could not process this file.');
+      if (!removedJob.current) notify('Upload failed', error instanceof Error ? error.message : 'Could not process this file.');
     } finally {
+      if (removedJob.current) {
+        removedJob.current = null;
+        setJob(null);
+        setSelectedFile(null);
+      }
       setProcessing(false);
       setStage(null);
     }
@@ -167,6 +208,18 @@ export default function Upload() {
               <Text style={s.narratorSubtitle} numberOfLines={2}>Listen to the cast and start narrating.</Text>
             </View>
             <Ionicons name="chevron-forward" size={20} color={colors.faint} />
+          </Pressable>
+        )}
+
+        {processing && job && !job.awaitingCast && (
+          <Pressable style={s.narratorCard} onPress={stopNarration} disabled={stopping} accessibilityRole="button" accessibilityLabel="Stop narration">
+            <View style={[s.narratorIcon, { backgroundColor: 'rgba(224,102,122,0.14)' }]}>
+              <Ionicons name="stop-circle-outline" size={22} color={colors.danger} />
+            </View>
+            <View style={s.narratorInfo}>
+              <Text style={s.narratorTitle}>{stopping ? 'Stopping\u2026' : 'Stop narration'}</Text>
+              <Text style={s.narratorSubtitle} numberOfLines={2}>{stopping ? 'Finishing the line being read' : 'Back to Meet the cast. The audio so far is deleted.'}</Text>
+            </View>
           </Pressable>
         )}
 
@@ -305,6 +358,7 @@ export default function Upload() {
           onClose={() => setCastOpen(false)}
           onDone={() => { setCastOpen(false); setStage('Queued'); }}
           onOpenStudio={openStudio}
+          onDelete={deleteBook}
         />
       )}
 
