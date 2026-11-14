@@ -1,5 +1,5 @@
 
-import { useRef, useState } from 'react';
+import { useRef } from 'react';
 import {
   Animated,
   Pressable,
@@ -15,26 +15,29 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Screen } from '../../../components/Screen';
 import { CityHero } from '../../../components/night/NightSky';
 import { Reveal } from '../../../components/Reveal';
-import { DoodleUnderline } from '../../../components/Doodle';
+import { CassetteCard } from '../../../components/CassetteCard';
 import { colors, fonts, radius, scenes } from '../../../../theme';
 import {
   GENRES,
   RECOMMENDED,
-  booksInGenre,
-  genreOf,
-  type DiscoverBook,
   type GenreId,
 } from '../../../data/discover';
 
 const accent = scenes.dusk.accent;
 
-function openBook(book: DiscoverBook) {
+const GENRE_COPY: Record<GenreId, string> = {
+  fantasy: 'Beyond reality',
+  classics: 'Timeless stories',
+  romance: 'Love and longing',
+  mystery: 'Hidden truths',
+  horror: 'After dark',
+  adventure: 'Into the unknown',
+};
+
+function openGenre(id: GenreId) {
   router.push({
-    pathname: '/Test/book_details',
-    params: {
-      title: book.title,
-      author: book.author,
-    },
+    pathname: '/Test/genre/[id]',
+    params: { id },
   });
 }
 
@@ -53,163 +56,89 @@ function SectionHead({
   );
 }
 
-function TapeReel({ small = false }: { small?: boolean }) {
-  return (
-    <View style={[s.reel, small && s.reelSmall]}>
-      <View style={[s.reelInner, small && s.reelInnerSmall]}>
-        <View style={s.reelCenter} />
-      </View>
-    </View>
-  );
-}
-
-function Cassette({
-  book,
-  compact = false,
+function GenreCard({
+  genre,
 }: {
-  book: DiscoverBook;
-  compact?: boolean;
+  genre: (typeof GENRES)[number];
 }) {
-  const bookAccent = book.accent || '#B18BCA';
-  const bookGenre = genreOf(book.genre);
-
   return (
     <Pressable
-      onPress={() => openBook(book)}
+      onPress={() => openGenre(genre.id)}
       accessibilityRole="button"
-      accessibilityLabel={`${book.title} by ${book.author}`}
+      accessibilityLabel={`Explore ${genre.label}`}
       style={({ pressed }) => [
-        compact ? s.compactCard : s.cassetteCard,
-        pressed && s.pressed,
+        s.genreCard,
+        pressed && s.genrePressed,
       ]}
     >
       <View
         style={[
-          s.cassetteShell,
-          compact && s.compactShell,
-          { borderColor: bookAccent },
+          s.genreGlow,
+          { backgroundColor: `${genre.color}12` },
+        ]}
+      />
+
+      <View
+        style={[
+          s.genreIcon,
+          {
+            backgroundColor: `${genre.color}20`,
+            borderColor: `${genre.color}55`,
+          },
         ]}
       >
-        <View style={s.cassetteTop}>
-          <View style={s.screw} />
-          <Text
-            style={[
-              s.cassetteBrand,
-              compact && s.compactBrand,
-            ]}
-          >
-            ECHO AUDIO
-          </Text>
-          <View style={s.screw} />
-        </View>
-
-        <View
-          style={[
-            s.paperLabel,
-            compact && s.compactPaper,
-          ]}
-        >
-          <View
-            style={[
-              s.labelStripe,
-              { backgroundColor: bookAccent },
-            ]}
-          />
-
-          <Text
-            style={[
-              s.cassetteTitle,
-              compact && s.compactTitle,
-            ]}
-            numberOfLines={compact ? 2 : 2}
-          >
-            {book.title}
-          </Text>
-
-          <Text
-            style={[
-              s.cassetteAuthor,
-              compact && s.compactAuthor,
-            ]}
-            numberOfLines={1}
-          >
-            {book.author}
-          </Text>
-
-          <View
-            style={[
-              s.tapeWindow,
-              compact && s.compactWindow,
-            ]}
-          >
-            <View style={s.tapeBand} />
-            <TapeReel small={compact} />
-            <TapeReel small={compact} />
-          </View>
-
-          <View style={s.cassetteInfo}>
-            <Text
-              style={[
-                s.cassetteGenre,
-                compact && s.compactGenre,
-              ]}
-              numberOfLines={1}
-            >
-              {bookGenre.label.toUpperCase()}
-            </Text>
-            <Text style={s.sideLabel}>A</Text>
-          </View>
-        </View>
-
-        <View style={s.cassetteBottom}>
-          <View style={s.screw} />
-          <View style={s.bottomNotch} />
-          <View style={s.screw} />
-        </View>
+        <Ionicons
+          name={genre.icon}
+          size={26}
+          color={genre.color}
+        />
       </View>
 
-      {!compact && (
-        <View style={s.cassetteFooter}>
-          <View style={s.cassetteFooterText}>
-            <Text style={s.cassetteEyebrow}>
-              ECHO RECOMMENDS
-            </Text>
-            <Text
-              style={s.cassetteAction}
-              numberOfLines={1}
-            >
-              Discover story
-            </Text>
-          </View>
-
-          <View
-            style={[
-              s.cassettePlay,
-              { backgroundColor: bookAccent },
-            ]}
-          >
-            <Ionicons
-              name="play"
-              size={17}
-              color="#141023"
-            />
-          </View>
-        </View>
-      )}
-
-      {compact && (
-        <Text style={s.smallTitle} numberOfLines={2}>
-          {book.title}
+      <View style={s.genreText}>
+        <Text
+          style={[
+            s.genreEyebrow,
+            { color: genre.color },
+          ]}
+        >
+          EXPLORE COLLECTION
         </Text>
-      )}
+
+        <Text
+          style={s.genreTitle}
+          numberOfLines={2}
+        >
+          {genre.label}
+        </Text>
+
+        <Text
+          style={s.genreDescription}
+          numberOfLines={2}
+        >
+          {GENRE_COPY[genre.id]}
+        </Text>
+      </View>
+
+      <View style={s.genreBottom}>
+        <View
+          style={[
+            s.genreLine,
+            { backgroundColor: genre.color },
+          ]}
+        />
+
+        <Ionicons
+          name="arrow-forward"
+          size={17}
+          color={genre.color}
+        />
+      </View>
     </Pressable>
   );
 }
 
 export default function LibraryScreen() {
   const scrollY = useRef(new Animated.Value(0)).current;
-  const [genre, setGenre] = useState<GenreId>('fantasy');
-  const picked = genreOf(genre);
 
   return (
     <Screen scene="dusk" city={false} lanterns>
@@ -243,13 +172,18 @@ export default function LibraryScreen() {
         )}
         scrollEventThrottle={16}
       >
-        <CityHero height={250} scrollY={scrollY}>
+        <CityHero
+          height={250}
+          scrollY={scrollY}
+        >
           <View style={s.header}>
             <Text style={s.eyebrow}>
               STORIES ARE WAITING
             </Text>
 
-            <Text style={s.title}>Library</Text>
+            <Text style={s.title}>
+              Library
+            </Text>
 
             <Text style={s.subtitle}>
               Find your next story.
@@ -260,7 +194,7 @@ export default function LibraryScreen() {
         <Pressable
           style={s.search}
           onPress={() => router.push('/Test/search')}
-          accessibilityRole="search"
+          accessibilityRole="button"
           accessibilityLabel="Search books, authors, genres"
         >
           <Ionicons
@@ -268,6 +202,7 @@ export default function LibraryScreen() {
             size={18}
             color={colors.dim}
           />
+
           <Text style={s.searchText}>
             Search books, authors, genres…
           </Text>
@@ -287,7 +222,7 @@ export default function LibraryScreen() {
             snapToInterval={292}
           >
             {RECOMMENDED.map((book) => (
-              <Cassette
+              <CassetteCard
                 key={book.title}
                 book={book}
               />
@@ -298,88 +233,17 @@ export default function LibraryScreen() {
         <Reveal index={1}>
           <SectionHead
             title="Browse by Genre"
-            subtitle="What kind of story are you in the mood for?"
+            subtitle="Find a collection that speaks to you"
           />
 
           <View style={s.genres}>
-            {GENRES.map((g) => {
-              const on = g.id === genre;
-
-              return (
-                <Pressable
-                  key={g.id}
-                  onPress={() => setGenre(g.id)}
-                  style={[
-                    s.genre,
-                    on && {
-                      borderColor: g.color,
-                      backgroundColor: 'rgba(30,23,47,0.92)',
-                    },
-                  ]}
-                  accessibilityRole="button"
-                  accessibilityState={{ selected: on }}
-                >
-                  <Text
-                    style={[
-                      s.genreLabel,
-                      on && { color: colors.text },
-                    ]}
-                  >
-                    {g.label}
-                  </Text>
-
-                  <View
-                    style={[
-                      s.genreIcon,
-                      {
-                        backgroundColor: `${g.color}${on ? '40' : '22'}`,
-                      },
-                    ]}
-                  >
-                    <Ionicons
-                      name={g.icon}
-                      size={18}
-                      color={g.color}
-                    />
-                  </View>
-                </Pressable>
-              );
-            })}
-          </View>
-        </Reveal>
-
-        <Reveal index={2}>
-          <View style={s.sectionHead}>
-            <Text style={s.sectionTitle}>
-              {picked.label} Books
-            </Text>
-
-            <DoodleUnderline
-              width={110}
-              color={picked.color}
-              seed={picked.label}
-              delay={150}
-              key={picked.id}
-            />
-
-            <Text style={s.sectionSubtitle}>
-              {booksInGenre(genre).length} stories to explore
-            </Text>
-          </View>
-
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={s.rail}
-          >
-            {booksInGenre(genre).map((book) => (
-              <Cassette
-                key={book.title}
-                book={book}
-                compact
+            {GENRES.map((genre) => (
+              <GenreCard
+                key={genre.id}
+                genre={genre}
               />
             ))}
-          </ScrollView>
+          </View>
         </Reveal>
 
         <View style={s.footer}>
@@ -388,6 +252,7 @@ export default function LibraryScreen() {
             size={14}
             color={colors.faint}
           />
+
           <Text style={s.footerText}>
             Every good story starts somewhere.
           </Text>
@@ -401,19 +266,16 @@ const s = StyleSheet.create({
   page: {
     paddingBottom: 200,
   },
-
   header: {
     paddingHorizontal: 20,
     paddingTop: 22,
   },
-
   eyebrow: {
     fontFamily: fonts.sansBold,
     fontSize: 11,
     letterSpacing: 2.5,
     color: accent,
   },
-
   title: {
     fontFamily: fonts.display,
     fontSize: 40,
@@ -421,14 +283,12 @@ const s = StyleSheet.create({
     color: '#FFFFFF',
     marginTop: 4,
   },
-
   subtitle: {
     fontFamily: fonts.serifItalic,
     fontSize: 16,
     color: 'rgba(255,255,255,0.75)',
     marginTop: 2,
   },
-
   search: {
     marginHorizontal: 20,
     marginTop: 4,
@@ -443,332 +303,108 @@ const s = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(218,194,240,0.16)',
   },
-
   searchText: {
     fontFamily: fonts.sans,
     fontSize: 15,
     color: colors.faint,
   },
-
   sectionHead: {
     paddingHorizontal: 20,
     marginBottom: 12,
     marginTop: 8,
   },
-
   sectionTitle: {
     fontFamily: fonts.display,
     fontSize: 22,
     color: '#FFFFFF',
   },
-
   sectionSubtitle: {
     fontFamily: fonts.sans,
     fontSize: 13,
     color: colors.dim,
     marginTop: 2,
   },
-
   rail: {
     paddingHorizontal: 20,
     gap: 12,
     paddingBottom: 24,
   },
-
-  cassetteCard: {
-    width: 280,
-    borderRadius: 19,
-    backgroundColor: 'rgba(12,10,29,0.94)',
-    borderWidth: 1,
-    borderColor: 'rgba(218,194,240,0.20)',
-    padding: 12,
-  },
-
-  pressed: {
-    opacity: 0.8,
-    transform: [{ translateY: -3 }],
-  },
-
-  cassetteShell: {
-    height: 192,
-    borderWidth: 2,
-    borderRadius: 13,
-    backgroundColor: '#252039',
-    paddingHorizontal: 12,
-    paddingVertical: 9,
-    justifyContent: 'space-between',
-  },
-
-  cassetteTop: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-
-  screw: {
-    width: 7,
-    height: 7,
-    borderRadius: 4,
-    borderWidth: 1,
-    borderColor: '#8F829F',
-    backgroundColor: '#43384D',
-  },
-
-  cassetteBrand: {
-    fontFamily: fonts.sansBold,
-    color: '#CDB9DE',
-    fontSize: 9,
-    letterSpacing: 2.3,
-  },
-
-  paperLabel: {
-    backgroundColor: '#EFDFEA',
-    borderRadius: 7,
-    paddingHorizontal: 12,
-    paddingTop: 8,
-    paddingBottom: 7,
-    overflow: 'hidden',
-  },
-
-  labelStripe: {
-    height: 5,
-    borderRadius: 3,
-    marginBottom: 7,
-  },
-
-  cassetteTitle: {
-    fontFamily: fonts.serif,
-    fontSize: 17,
-    lineHeight: 20,
-    color: '#271A33',
-    minHeight: 40,
-  },
-
-  cassetteAuthor: {
-    fontFamily: fonts.serifItalic,
-    color: '#76617E',
-    fontSize: 11,
-    marginTop: 2,
-    marginBottom: 7,
-  },
-
-  tapeWindow: {
-    height: 41,
-    backgroundColor: '#171222',
-    borderRadius: 22,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-around',
-    overflow: 'hidden',
-  },
-
-  tapeBand: {
-    position: 'absolute',
-    left: '18%',
-    right: '18%',
-    height: 18,
-    borderRadius: 4,
-    backgroundColor: '#3E324B',
-  },
-
-  reel: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    backgroundColor: '#51435F',
-    borderWidth: 4,
-    borderColor: '#30253D',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-
-  reelInner: {
-    width: 19,
-    height: 19,
-    borderRadius: 10,
-    backgroundColor: '#D7C7DF',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-
-  reelCenter: {
-    width: 7,
-    height: 7,
-    borderRadius: 4,
-    backgroundColor: '#3A294A',
-  },
-
-  cassetteInfo: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginTop: 5,
-  },
-
-  cassetteGenre: {
-    fontFamily: fonts.sansBold,
-    fontSize: 8,
-    letterSpacing: 0.7,
-    color: '#624F6C',
-    flex: 1,
-  },
-
-  sideLabel: {
-    fontFamily: fonts.sansBold,
-    fontSize: 10,
-    color: '#624F6C',
-    marginLeft: 5,
-  },
-
-  cassetteBottom: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-
-  bottomNotch: {
-    height: 5,
-    width: 65,
-    borderRadius: 3,
-    backgroundColor: '#5A496C',
-  },
-
-  cassetteFooter: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 4,
-    paddingTop: 12,
-    paddingBottom: 2,
-  },
-
-  cassetteFooterText: {
-    flex: 1,
-  },
-
-  cassetteEyebrow: {
-    fontFamily: fonts.sansBold,
-    fontSize: 9,
-    letterSpacing: 1.7,
-    color: '#A99AB8',
-  },
-
-  cassetteAction: {
-    fontFamily: fonts.serif,
-    fontSize: 15,
-    color: '#F1E5FB',
-    marginTop: 4,
-  },
-
-  cassettePlay: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-
   genres: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 10,
+    columnGap: 14,
+    rowGap: 14,
     paddingHorizontal: 20,
-    marginBottom: 24,
+    marginBottom: 30,
+    alignItems: 'flex-start',
   },
-
-  genre: {
-    width: '48%',
-    flexGrow: 1,
-    height: 62,
-    borderRadius: radius.md,
-    paddingLeft: 14,
-    paddingRight: 10,
+  genreCard: {
+    width: '47%',
+    maxWidth: 260,
+    minHeight: 180,
+    borderRadius: 18,
+    padding: 16,
+    backgroundColor: 'rgba(29,20,49,0.96)',
+    borderWidth: 1,
+    borderColor: 'rgba(218,194,240,0.18)',
+    overflow: 'hidden',
+    justifyContent: 'space-between',
+  },
+  genrePressed: {
+    opacity: 0.82,
+    transform: [{ scale: 0.98 }],
+  },
+  genreGlow: {
+    position: 'absolute',
+    width: 115,
+    height: 115,
+    borderRadius: 58,
+    top: -50,
+    right: -40,
+  },
+  genreIcon: {
+    width: 49,
+    height: 49,
+    borderRadius: 14,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 14,
+  },
+  genreText: {
+    flex: 1,
+    justifyContent: 'center',
+  },
+  genreEyebrow: {
+    fontFamily: fonts.sansBold,
+    fontSize: 8,
+    letterSpacing: 1,
+    marginBottom: 7,
+  },
+  genreTitle: {
+    fontFamily: fonts.serif,
+    fontSize: 19,
+    lineHeight: 23,
+    color: '#F3E9FF',
+  },
+  genreDescription: {
+    fontFamily: fonts.serifItalic,
+    fontSize: 12,
+    lineHeight: 17,
+    color: '#BDAEC9',
+    marginTop: 5,
+  },
+  genreBottom: {
+    marginTop: 14,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: 'rgba(15,12,32,0.86)',
-    borderWidth: 1.5,
-    borderColor: 'rgba(218,194,240,0.16)',
   },
-
-  genreLabel: {
-    fontFamily: fonts.sansBold,
-    fontSize: 14,
-    color: colors.dim,
-    flexShrink: 1,
-  },
-
-  genreIcon: {
+  genreLine: {
     width: 34,
-    height: 34,
-    borderRadius: radius.sm,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginLeft: 8,
+    height: 2,
+    borderRadius: 2,
   },
-
-  compactCard: {
-    width: 176,
-    gap: 10,
-  },
-
-  compactShell: {
-    height: 154,
-    paddingHorizontal: 7,
-    paddingVertical: 7,
-    borderRadius: 11,
-  },
-
-  compactBrand: {
-    fontSize: 7,
-    letterSpacing: 1.2,
-  },
-
-  compactPaper: {
-    paddingHorizontal: 8,
-    paddingVertical: 6,
-  },
-
-  compactTitle: {
-    fontSize: 12,
-    lineHeight: 14,
-    minHeight: 28,
-  },
-
-  compactAuthor: {
-    fontSize: 9,
-    marginBottom: 5,
-  },
-
-  compactWindow: {
-    height: 29,
-  },
-
-  reelSmall: {
-    width: 25,
-    height: 25,
-    borderRadius: 13,
-    borderWidth: 3,
-  },
-
-  reelInnerSmall: {
-    width: 13,
-    height: 13,
-    borderRadius: 7,
-  },
-
-  compactGenre: {
-    fontSize: 7,
-    letterSpacing: 0,
-  },
-
-  smallTitle: {
-    fontFamily: fonts.serif,
-    fontSize: 14,
-    lineHeight: 18,
-    color: '#FFFFFF',
-  },
-
   footer: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -776,7 +412,6 @@ const s = StyleSheet.create({
     gap: 8,
     marginTop: 8,
   },
-
   footerText: {
     fontFamily: fonts.serifItalic,
     fontSize: 13,
