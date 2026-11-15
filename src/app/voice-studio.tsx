@@ -190,7 +190,7 @@ function VoiceStudio() {
       <Screen interior="studio">
         <View style={s.content}>
           <View style={s.header}>
-            <Pressable style={s.iconButton} onPress={() => (router.canGoBack() ? router.back() : router.navigate('/Test/upload'))} hitSlop={8} accessibilityLabel="Go back">
+            <Pressable style={s.iconButton} onPress={() => (router.canGoBack() ? router.back() : router.replace('/Test/upload'))} hitSlop={8} accessibilityLabel="Go back">
               <Ionicons name="chevron-back" size={20} color={colors.text} />
             </Pressable>
           </View>
@@ -206,7 +206,7 @@ function VoiceStudio() {
       <KeyboardAvoidingView style={s.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <ScrollView contentContainerStyle={s.content} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
         <View style={s.header}>
-          <Pressable testID="narrator-back" style={s.iconButton} onPress={() => (router.canGoBack() ? router.back() : router.navigate('/Test/upload'))} hitSlop={8} accessibilityLabel="Go back">
+          <Pressable testID="narrator-back" style={s.iconButton} onPress={() => (router.canGoBack() ? router.back() : router.replace('/Test/upload'))} hitSlop={8} accessibilityLabel="Go back">
             <Ionicons name="chevron-back" size={20} color={colors.text} />
           </Pressable>
           {state && tab === 'describe' && (

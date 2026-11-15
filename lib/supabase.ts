@@ -19,8 +19,10 @@ const safeStorage = {
 export const supabase = createClient<Database>(supabaseUrl, supabaseKey, {
   auth: {
     storage: safeStorage,
-    persistSession: true,
-    autoRefreshToken: true,
+    // Web pages are also rendered once in Node by the dev server (web output "static"). There, a session refresh
+    // timer would never stop and keep every render's copy of the app in memory until Metro ran out of heap.
+    persistSession: !isServer,
+    autoRefreshToken: !isServer,
     detectSessionInUrl: false,
   },
 })
