@@ -1,18 +1,31 @@
 import { Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as DocumentPicker from 'expo-document-picker';
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { router, useFocusEffect } from 'expo-router';
 
 import { Screen } from '../../components/Screen';
 import { colors, fonts, type } from '../../../theme';
 import { getNarrators } from '../../data/narrators';
-import { processBook } from '../../data/bookJobs';
-import { notify } from '../../../lib/notify';
+import { processBook, removeBook, stopBook, type BookJob } from '../../data/bookJobs';
+import { confirm, notify } from '../../../lib/notify';
+import { notifyChapterReady } from '../../data/notifications';
 import { Sheet } from '../../components/Sheet';
 import { ClassicSheet } from '../../components/ClassicSheet';
+import { CastSheet } from '../../components/CastSheet';
 import { CLASSICS, useSavedClassics, type Classic } from '../../data/catalog';
 import { useSettings } from '../../data/settings';
+import { signedInClient } from '../../data/supabaseRows';
+
+// Same title the server gives the book: the file name without its extension.
+const bookTitle = (fileName: string) => fileName.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ').trim();
+
+function readyLabel(job: BookJob) {
+  const chapters = job.chapters ?? [];
+  const ready = chapters.filter((chapter) => chapter.status === 'ready').length;
+  if (chapters.length <= 1) return 'Your audiobook is ready to play';
+  return job.status === 'processing' ? `${ready} of ${chapters.length} chapters ready. The rest keep narrating.` : `${ready} of ${chapters.length} chapters ready`;
+}
 
 // The first few classics; See All opens the full catalog.
 const PUBLIC_DOMAIN_BOOKS = CLASSICS.slice(0, 4);
@@ -21,19 +34,82 @@ export default function Upload() {
   const [processing, setProcessing] = useState(false);
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const [stage, setStage] = useState<string | null>(null);
+  // The job being narrated, kept so a finished chapter can be opened while the rest of the book is made.
+  const [job, setJob] = useState<BookJob | null>(null);
   const [narratorName, setNarratorName] = useState<string | null>(null);
   const [helpOpen, setHelpOpen] = useState(false);
   const [openBook, setOpenBook] = useState<Classic | null>(null);
   const [saved, toggleSaved] = useSavedClassics();
   const [settings, update] = useSettings();
+  // The cast review opens once per book when its voices are ready, and again when the reader comes back from the
+  // Voice Studio to use a voice they just made.
+  const [castOpen, setCastOpen] = useState(false);
+  const reviewedJob = useRef<string | null>(null);
+  const reopenCast = useRef(false);
+  const [stopping, setStopping] = useState(false);
+  // A book deleted from Meet the cast: its job disappears, which isn't an upload failure.
+  const removedJob = useRef<string | null>(null);
 
   useFocusEffect(useCallback(() => {
     getNarrators()
       .then((state) => setNarratorName(state.voices.find((voice) => voice.id === state.selectedId)?.name ?? null))
       .catch(() => setNarratorName(null));
+    if (reopenCast.current) {
+      reopenCast.current = false;
+      setCastOpen(true);
+    }
   }, []));
 
+  const openStudio = () => {
+    reopenCast.current = true;
+    setCastOpen(false);
+    router.push('/voice-studio');
+  };
+
+  // Stop deletes the narration made so far and brings back Meet the cast (start again, or delete the book).
+  const stopNarration = async () => {
+    if (!job || stopping) return;
+    if (!(await confirm('Stop narrating?', 'The audio made so far is deleted and you go back to Meet the cast. The voices are kept, and you can start again or delete the book.', 'Stop'))) return;
+    setStopping(true);
+    try {
+      const result = await stopBook(job.jobId);
+      if (result.awaitingCast) {
+        setJob((current) => (current ? { ...current, awaitingCast: true, cast: result.cast, stage: 'Review the cast', chapters: current.chapters?.map((chapter) => ({ ...chapter, status: 'queued' as const })) } : current));
+        setCastOpen(true);
+      } else {
+        notify('Stopping after the voices', 'Echo is still making the cast\u2019s voices. Meet the cast opens when they\u2019re ready, and narration won\u2019t start until you approve it.');
+        reviewedJob.current = null;
+      }
+    } catch (error) {
+      notify('Couldn\u2019t stop narration', error instanceof Error ? error.message : 'The voice server didn\u2019t respond.');
+    } finally {
+      setStopping(false);
+    }
+  };
+
+  const deleteBook = async () => {
+    if (!job) return;
+    removedJob.current = job.jobId;
+    await removeBook(job.jobId).catch((error) => {
+      removedJob.current = null;
+      throw error;
+    });
+    setCastOpen(false);
+    setJob(null);
+    notify('Book deleted', 'The book and everything made for it are gone.');
+  };
+
+  const openJob = (current: BookJob) => {
+    router.push({ pathname: '/Test/book_details', params: { id: current.jobId, title: selectedFile ? bookTitle(selectedFile) : 'Your book', author: 'Uploaded by you' } });
+  };
+
   const selectAndProcess = async () => {
+    // Narration spends Claude and Gemini credits, so the server only takes books from signed-in readers.
+    if (!(await signedInClient())) {
+      notify('Sign in to add a book', 'Narrating a book needs an Echo account.');
+      router.push('/Test/login');
+      return;
+    }
     const result = await DocumentPicker.getDocumentAsync({
       type: ['application/pdf', 'application/epub+zip', 'text/plain', 'text/markdown', 'application/octet-stream'],
       copyToCacheDirectory: true,
@@ -43,12 +119,32 @@ export default function Upload() {
     setSelectedFile(file.name);
     setProcessing(true);
     setStage('Uploading');
+    setJob(null);
     try {
-      const job = await processBook(file, setStage);
-      notify('Book processed', `${job.result?.roster?.length ?? 0} voices found. IndexTTS generated the segment audio.`);
+      const finished = await processBook(file, (update) => {
+        setStage(update.stage);
+        setJob(update);
+        if (update.awaitingCast && reviewedJob.current !== update.jobId) {
+          reviewedJob.current = update.jobId;
+          setCastOpen(true);
+        }
+        // Only a multi-chapter book gets a note per chapter; a one-chapter book ends with the "Book ready" alert.
+        const chapters = update.chapters ?? [];
+        if (chapters.length > 1) for (const chapter of chapters) if (chapter.status === 'ready') void notifyChapterReady(update.jobId, chapter.index, bookTitle(file.name), chapter.title);
+      }, { characterVoices: settings.characterVoices });
+      const chapters = finished.chapters ?? [];
+      const voices = finished.result?.roster?.characters.length ?? 0;
+      const summary = chapters.length > 1 ? `${chapters.filter((c) => c.status === 'ready').length} of ${chapters.length} chapters narrated` : 'Narration finished';
+      const reader = settings.characterVoices ? `with ${voices} voices` : 'by your narrator';
+      notify('Book ready', `${summary} ${reader}.${finished.error ? ` ${finished.error}` : ''}`);
     } catch (error) {
-      notify('Upload failed', error instanceof Error ? error.message : 'Could not process this file.');
+      if (!removedJob.current) notify('Upload failed', error instanceof Error ? error.message : 'Could not process this file.');
     } finally {
+      if (removedJob.current) {
+        removedJob.current = null;
+        setJob(null);
+        setSelectedFile(null);
+      }
       setProcessing(false);
       setStage(null);
     }
@@ -94,7 +190,7 @@ export default function Upload() {
           </Text>
 
           <Text style={s.uploadDescription}>
-            {processing ? `${stage ?? 'Processing'}...` : 'Add a book from your device'}
+            {processing ? (job?.awaitingCast ? 'Waiting for you to approve the cast' : `${stage ?? 'Processing'}...`) : 'Add a book from your device'}
           </Text>
 
           <Text style={s.fileTypes}>
@@ -102,14 +198,54 @@ export default function Upload() {
           </Text>
         </Pressable>
 
-        <Pressable style={s.narratorCard} onPress={() => router.push('/narrator-voices')}>
+        {job?.awaitingCast && (
+          <Pressable style={[s.narratorCard, s.reviewCard]} onPress={() => setCastOpen(true)} accessibilityRole="button">
+            <View style={[s.narratorIcon, { backgroundColor: 'rgba(245,198,90,0.16)' }]}>
+              <Ionicons name="people-outline" size={22} color={colors.gold} />
+            </View>
+            <View style={s.narratorInfo}>
+              <Text style={s.narratorTitle}>The voices are ready</Text>
+              <Text style={s.narratorSubtitle} numberOfLines={2}>Listen to the cast and start narrating.</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={20} color={colors.faint} />
+          </Pressable>
+        )}
+
+        {processing && job && !job.awaitingCast && (
+          <Pressable style={s.narratorCard} onPress={stopNarration} disabled={stopping} accessibilityRole="button" accessibilityLabel="Stop narration">
+            <View style={[s.narratorIcon, { backgroundColor: 'rgba(224,102,122,0.14)' }]}>
+              <Ionicons name="stop-circle-outline" size={22} color={colors.danger} />
+            </View>
+            <View style={s.narratorInfo}>
+              <Text style={s.narratorTitle}>{stopping ? 'Stopping\u2026' : 'Stop narration'}</Text>
+              <Text style={s.narratorSubtitle} numberOfLines={2}>{stopping ? 'Finishing the line being read' : 'Back to Meet the cast. The audio so far is deleted.'}</Text>
+            </View>
+          </Pressable>
+        )}
+
+        {job && (job.chapters ?? []).some((chapter) => chapter.status === 'ready') && (
+          <Pressable style={s.narratorCard} onPress={() => openJob(job)} accessibilityRole="button">
+            <View style={s.narratorIcon}>
+              <Ionicons name="headset-outline" size={22} color={colors.pink} />
+            </View>
+            <View style={s.narratorInfo}>
+              <Text style={s.narratorTitle}>{job.status === 'processing' ? 'Listen now' : 'Open your audiobook'}</Text>
+              <Text style={s.narratorSubtitle} numberOfLines={2}>
+                {readyLabel(job)}
+              </Text>
+            </View>
+            <Ionicons name="chevron-forward" size={20} color={colors.faint} />
+          </Pressable>
+        )}
+
+        <Pressable style={s.narratorCard} onPress={() => router.push('/voice-studio')}>
           <View style={s.narratorIcon}>
             <Ionicons name="mic-outline" size={22} color={colors.pink} />
           </View>
           <View style={s.narratorInfo}>
-            <Text style={s.narratorTitle}>Narrator Voice</Text>
+            <Text style={s.narratorTitle}>Voice Studio</Text>
             <Text style={s.narratorSubtitle} numberOfLines={1}>
-              {narratorName ? `Narrating as ${narratorName}` : 'Create and choose who reads your books'}
+              {narratorName ? `Narrating as ${narratorName}` : 'Design or record the voices that read your books'}
             </Text>
           </View>
           <Ionicons name="chevron-forward" size={20} color={colors.faint} />
@@ -212,14 +348,28 @@ export default function Upload() {
 
       </ScrollView>
 
+      {job && (
+        <CastSheet
+          visible={castOpen && Boolean(job.awaitingCast)}
+          bookId={job.jobId}
+          title={selectedFile ? bookTitle(selectedFile) : 'your book'}
+          cast={job.cast ?? []}
+          mode="review"
+          onClose={() => setCastOpen(false)}
+          onDone={() => { setCastOpen(false); setStage('Queued'); }}
+          onOpenStudio={openStudio}
+          onDelete={deleteBook}
+        />
+      )}
+
       <ClassicSheet book={openBook} saved={openBook ? saved.has(openBook.id) : false} onToggle={() => openBook && toggleSaved(openBook.id)} onClose={() => setOpenBook(null)} />
 
       <Sheet visible={helpOpen} onClose={() => setHelpOpen(false)} title="How uploading works">
         <View style={{ gap: 12, paddingBottom: 8 }}>
           {[
             ['document-text-outline', 'PDF, EPUB, TXT or Markdown, up to 50 MB. The file needs real text; scanned page images can’t be read yet.'],
-            ['people-outline', 'Echo reads the book, finds every character, and gives each one their own voice.'],
-            ['time-outline', 'Short stories take a few minutes. You can leave this screen; we’ll keep working.'],
+            ['people-outline', 'Echo reads the book, finds every character, and gives each one their own voice. You hear the cast before narration starts, and can swap any voice for one from your Voice Studio.'],
+            ['time-outline', 'Books with chapters are narrated one chapter at a time, so you can start listening as soon as the first is ready. You can leave this screen; we’ll keep working.'],
             ['mic-outline', 'Your chosen narrator reads everything that isn’t dialogue.'],
           ].map(([icon, text]) => (
             <View key={icon} style={{ flexDirection: 'row', gap: 12 }}>
@@ -314,6 +464,8 @@ const s = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
   },
+
+  reviewCard: { borderColor: 'rgba(245,198,90,0.5)' },
 
   narratorIcon: {
     width: 44,

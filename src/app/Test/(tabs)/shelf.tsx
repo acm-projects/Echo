@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View, useWindowDimensions } from 'react-native';
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 
 import { Screen } from '../../../components/Screen';
@@ -9,7 +9,8 @@ import { Jacket } from '../../../components/Jacket';
 import { CityLoader } from '../../../components/CityLoader';
 import { colors, fonts, radius, scenes } from '../../../../theme';
 import { loadShelf, type DisplayBook } from '../../../data/shelf';
-import { playback } from '../../../data/playback';
+import { resumeBook } from '../../../data/resume';
+import { supabase } from '../../../../lib/supabase';
 
 const accent = scenes.aurora.accent;
 
@@ -47,7 +48,14 @@ export default function Shelf() {
     setError(null);
     loadShelf().then(setBooks, () => setError('Could not load your books. Please try again.'));
   }, []);
-  useEffect(load, [load]);
+  // Reloaded whenever the tab comes back into view or the session changes, so a book that just finished shows up.
+  useFocusEffect(load);
+  useEffect(() => {
+    const { data } = supabase.auth.onAuthStateChange((event) => {
+      if (event === 'SIGNED_IN' || event === 'SIGNED_OUT') load();
+    });
+    return () => data.subscription.unsubscribe();
+  }, [load]);
 
   const stats = useMemo(() => {
     const list = books ?? [];
@@ -62,7 +70,7 @@ export default function Shelf() {
   const cover = (width - 40 - 14) / 2;
 
   const resume = (book: DisplayBook) => {
-    playback.load({ title: book.title, author: book.author ?? 'Unknown author', chapter: 'Where you left off', chapterNumber: Math.max(1, Math.ceil((book.progress / 100) * Math.max(1, book.total_chapters))) });
+    void resumeBook(book);
     router.push('/Test/player');
   };
 

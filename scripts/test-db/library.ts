@@ -254,15 +254,6 @@ async function main() {
   if (catalogError) throw catalogError
   if (!catalogBook) throw new Error('The seeded catalog book should exist')
 
-  const roomChapterIndex = await logResult('my_catalog_chapter_index (User 2)', async () => {
-    const { data, error } = await supabase.rpc('my_catalog_chapter_index', {
-      p_catalog_book_id: catalogBook.id,
-    })
-    if (error) throw error
-    return data
-  })
-  assert.equal(roomChapterIndex, 0, 'User 2 should be at the early chapter in the Book Room')
-
   const { data: room, error: roomError } = await supabase
     .from('book_rooms')
     .select('id')
@@ -270,6 +261,14 @@ async function main() {
     .maybeSingle()
   if (roomError) throw roomError
   if (!room) throw new Error('The catalog book should have a Book Room')
+
+  // Rooms aren't tied to a copy: User 2's progress counts because their book is the same catalog book.
+  const roomChapterIndex = await logResult('my_room_chapter_index (User 2)', async () => {
+    const { data, error } = await supabase.rpc('my_room_chapter_index', { p_room: room.id })
+    if (error) throw error
+    return data
+  })
+  assert.equal(roomChapterIndex, 0, 'User 2 should be at the early chapter in the Book Room')
 
   const roomPosts = await logResult('room_posts_visible (User 2)', async () => {
     const { data, error } = await supabase

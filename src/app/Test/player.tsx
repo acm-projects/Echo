@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Animated, Easing, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Animated, Easing, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { router } from 'expo-router';
 import Svg, { Path } from 'react-native-svg';
 import { Ionicons } from '@expo/vector-icons';
@@ -9,10 +9,12 @@ import { Sheet, SheetItem } from '../../components/Sheet';
 import { FlyingBat, HangingBat } from '../../components/night/Bat';
 import { useReducedMotion } from '../../components/night/NightSky';
 import { colors, fonts, radius, scenes, type } from '../../../theme';
-import { formatTime, playback, useNowPlaying } from '../../data/playback';
+import { formatCountdown, formatTime, hasTrack, playback, useNowPlaying, useSleepCountdown } from '../../data/playback';
 import { useSettings } from '../../data/settings';
 
 const SPEEDS = [0.8, 1, 1.25, 1.5, 2];
+const SLEEP_PRESETS = [5, 10, 15, 30, 45, 60, 90];
+const SLEEP_MAX_MINUTES = 12 * 60;
 const neon = scenes.neon;
 
 // Five bars that dance while a voice is speaking and rest when paused.
@@ -52,7 +54,7 @@ function Cover({ title, author, playing }: { title: string; author: string; play
         <View style={{ marginTop: 'auto' }}>
           <Text style={s.coverTitle}>{title}</Text>
           <View style={s.coverLine} />
-          <Text style={s.coverAuthor}>{author.toUpperCase()}</Text>
+          <Text style={s.coverAuthor}>{(author || '').toUpperCase()}</Text>
         </View>
       </View>
       <Svg width="100%" height={46} viewBox="0 0 300 46" preserveAspectRatio="none" style={s.coverCity}>
@@ -73,9 +75,49 @@ export default function Player() {
     // Start each session at the listener's preferred speed.
     playback.setSpeed(settings.playbackSpeed);
   }, [settings.playbackSpeed]);
+  // The sleep timer runs in playback, so it keeps counting with this screen closed.
+  const sleepLeft = useSleepCountdown();
+  const [sleepSheet, setSleepSheet] = useState(false);
+  const [custom, setCustom] = useState('');
+  const customMinutes = Math.round(Number(custom));
+  const customValid = Number.isFinite(customMinutes) && customMinutes >= 1 && customMinutes <= SLEEP_MAX_MINUTES;
+  const startSleep = (minutes: number) => {
+    playback.setSleepTimer(minutes);
+    update('sleepTimerMinutes', minutes);
+    setCustom('');
+    setSleepSheet(false);
+  };
+  // iOS can't present a second modal while the first is still sliding away.
+  const openSleepFromMenu = () => {
+    setMenu(false);
+    setTimeout(() => setSleepSheet(true), Platform.OS === 'ios' ? 400 : 0);
+  };
+  const lastCustom = settings.sleepTimerMinutes > 0 && !SLEEP_PRESETS.includes(settings.sleepTimerMinutes) ? settings.sleepTimerMinutes : null;
 
   const collapse = () => (router.canGoBack() ? router.back() : router.navigate('/Test/library'));
   const nextSpeed = () => playback.setSpeed(SPEEDS[(SPEEDS.indexOf(now.speed) + 1) % SPEEDS.length]);
+
+  // Opened before any book was played (from the tab bar, or a deep link).
+  if (!hasTrack(now)) {
+    return (
+      <Screen scene="neon" variant="hero" style={{ paddingHorizontal: 24 }}>
+        <View style={s.top}>
+          <Pressable style={s.round} onPress={collapse} accessibilityRole="button" accessibilityLabel="Close player">
+            <Ionicons name="chevron-down" size={20} color={colors.text} />
+          </Pressable>
+        </View>
+        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', gap: 10, paddingBottom: 120 }}>
+          <HangingBat size={28} />
+          <Text style={[s.chapter, { marginTop: 12 }]}>Nothing playing yet</Text>
+          <Text style={[type.body, { textAlign: 'center', color: colors.dim }]}>Pick a book from your shelf and it will play here.</Text>
+          <Pressable style={[s.pill, { marginTop: 10 }]} onPress={() => router.navigate('/Test/shelf')} accessibilityRole="button">
+            <Ionicons name="library-outline" size={14} color={colors.text} />
+            <Text style={s.pillText}>Your shelf</Text>
+          </Pressable>
+        </View>
+      </Screen>
+    );
+  }
 
   return (
     <Screen scene="neon" variant="hero" style={{ paddingHorizontal: 24 }}>
@@ -99,8 +141,9 @@ export default function Player() {
           <Text style={s.chapter}>{now.chapter}</Text>
           <View style={s.speaking}>
             <Equalizer active={now.isPlaying} />
-            <Text style={s.speakingText}>{now.isPlaying ? `${now.speaker} is speaking` : 'Paused'}</Text>
+            <Text style={s.speakingText}>{now.isPlaying ? (now.speaker ? `${now.speaker} is speaking` : 'Playing') : 'Paused'}</Text>
           </View>
+          {now.error && <Text style={[type.meta, { color: colors.danger, textAlign: 'center' }]}>{now.error}</Text>}
         </View>
 
         <Pressable
@@ -110,7 +153,7 @@ export default function Player() {
           accessibilityRole="adjustable"
           accessibilityLabel="Seek"
         >
-          <ProgressBar value={now.positionSec / now.durationSec} height={5} />
+          <ProgressBar value={now.durationSec > 0 ? now.positionSec / now.durationSec : 0} height={5} />
         </Pressable>
         <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
           <Text style={type.meta}>{formatTime(now.positionSec)}</Text>
@@ -137,11 +180,11 @@ export default function Player() {
             <Pressable onPress={nextSpeed} style={s.pill} accessibilityRole="button" accessibilityLabel="Playback speed">
               <Text style={s.pillText}>{now.speed}×</Text>
             </Pressable>
-            <Pressable onPress={() => update('sleepTimerMinutes', settings.sleepTimerMinutes ? 0 : 30)} style={[s.pill, settings.sleepTimerMinutes > 0 && s.pillOn]} accessibilityRole="button" accessibilityLabel="Sleep timer">
-              <Ionicons name="moon-outline" size={14} color={settings.sleepTimerMinutes ? '#14102A' : colors.text} />
-              <Text style={[s.pillText, settings.sleepTimerMinutes > 0 && { color: '#14102A' }]}>{settings.sleepTimerMinutes ? `${settings.sleepTimerMinutes}m` : 'Sleep'}</Text>
+            <Pressable onPress={() => setSleepSheet(true)} style={[s.pill, sleepLeft !== null && s.pillOn]} accessibilityRole="button" accessibilityLabel={sleepLeft !== null ? `Sleep timer, ${formatCountdown(sleepLeft)} left` : 'Sleep timer'}>
+              <Ionicons name={sleepLeft !== null ? 'moon' : 'moon-outline'} size={14} color={sleepLeft !== null ? '#14102A' : colors.text} />
+              <Text style={[s.pillText, sleepLeft !== null && s.countdownText]}>{sleepLeft !== null ? formatCountdown(sleepLeft) : 'Sleep'}</Text>
             </Pressable>
-            <Pressable onPress={() => router.push({ pathname: '/Test/book_details', params: { title: now.title, author: now.author } })} style={s.pill} accessibilityRole="button">
+            <Pressable onPress={() => router.push({ pathname: '/Test/book_details', params: { id: now.bookId, title: now.title, author: now.author } })} style={s.pill} accessibilityRole="button">
               <Ionicons name="people-outline" size={14} color={colors.text} />
               <Text style={s.pillText}>Cast</Text>
             </Pressable>
@@ -157,9 +200,42 @@ export default function Player() {
             </Pressable>
           ))}
         </View>
-        <SheetItem icon="moon-outline" label="Sleep timer" detail={settings.sleepTimerMinutes ? `${settings.sleepTimerMinutes} min` : 'Off'} onPress={() => update('sleepTimerMinutes', ({ 0: 15, 15: 30, 30: 45, 45: 60, 60: 0 } as const)[settings.sleepTimerMinutes])} />
-        <SheetItem icon="book-outline" label="Book details & cast" onPress={() => { setMenu(false); router.push({ pathname: '/Test/book_details', params: { title: now.title, author: now.author } }); }} />
+        <SheetItem icon="moon-outline" label="Sleep timer" detail={sleepLeft !== null ? `${formatCountdown(sleepLeft)} left` : 'Off'} onPress={openSleepFromMenu} />
+        <SheetItem icon="book-outline" label="Book details & cast" onPress={() => { setMenu(false); router.push({ pathname: '/Test/book_details', params: { id: now.bookId, title: now.title, author: now.author } }); }} />
         <SheetItem icon="options-outline" label="Playback settings" detail="Speed, skip, autoplay" onPress={() => { setMenu(false); router.push('/Test/playback-settings'); }} />
+      </Sheet>
+
+      <Sheet visible={sleepSheet} onClose={() => setSleepSheet(false)} title="Sleep timer">
+        {sleepLeft !== null && (
+          <View style={s.sleepNow}>
+            <View style={{ flex: 1 }}>
+              <Text style={s.sheetLabel}>PAUSING IN</Text>
+              <Text style={s.sleepClock} accessibilityLiveRegion="polite">{formatCountdown(sleepLeft)}</Text>
+            </View>
+            <Pressable onPress={() => playback.extendSleepTimer(5)} style={s.pill} accessibilityRole="button" accessibilityLabel="Add five minutes">
+              <Text style={s.pillText}>+5 min</Text>
+            </Pressable>
+            <Pressable onPress={() => { playback.setSleepTimer(0); setSleepSheet(false); }} style={s.pill} accessibilityRole="button">
+              <Text style={[s.pillText, { color: colors.danger }]}>Turn off</Text>
+            </Pressable>
+          </View>
+        )}
+        <Text style={s.sheetLabel}>{sleepLeft !== null ? 'START OVER WITH' : 'PAUSE AFTER'}</Text>
+        <View style={s.sleepGrid}>
+          {[...SLEEP_PRESETS, ...(lastCustom ? [lastCustom] : [])].map((m) => (
+            <Pressable key={m} onPress={() => startSleep(m)} style={[s.sleepChip, settings.sleepTimerMinutes === m && sleepLeft !== null && s.pillOn]} accessibilityRole="button">
+              <Text style={[s.pillText, settings.sleepTimerMinutes === m && sleepLeft !== null && { color: '#14102A' }]}>{m >= 60 && m % 60 === 0 ? `${m / 60} h` : `${m} min`}</Text>
+            </Pressable>
+          ))}
+        </View>
+        <Text style={[s.sheetLabel, { marginTop: 14 }]}>CUSTOM</Text>
+        <View style={s.customRow}>
+          <TextInput value={custom} onChangeText={(t) => setCustom(t.replace(/[^0-9]/g, '').slice(0, 3))} placeholder="Minutes" placeholderTextColor={colors.faint} keyboardType="number-pad" returnKeyType="done" maxLength={3} style={s.customInput} onSubmitEditing={() => customValid && startSleep(customMinutes)} accessibilityLabel="Custom sleep timer minutes" />
+          <Pressable onPress={() => customValid && startSleep(customMinutes)} disabled={!customValid} style={[s.customStart, !customValid && { opacity: 0.4 }]} accessibilityRole="button">
+            <Text style={[s.pillText, { color: '#14102A' }]}>Start</Text>
+          </Pressable>
+        </View>
+        <Text style={[type.meta, { marginTop: 8 }]}>Anything from 1 minute to 12 hours. The timer keeps running when you leave the player.</Text>
       </Sheet>
     </Screen>
   );
@@ -189,5 +265,13 @@ const s = StyleSheet.create({
   pillText: { fontFamily: fonts.sansBold, fontSize: 13, color: colors.text },
   sheetLabel: { fontFamily: fonts.sansBold, fontSize: 12, letterSpacing: 2, color: colors.dim, marginBottom: 10 },
   speeds: { flexDirection: 'row', gap: 8, marginBottom: 8 },
+  countdownText: { color: '#14102A', fontVariant: ['tabular-nums'], minWidth: 34 },
+  sleepNow: { flexDirection: 'row', alignItems: 'center', gap: 8, padding: 14, marginBottom: 16, borderRadius: 12, backgroundColor: 'rgba(98,230,240,0.08)', borderWidth: 1, borderColor: 'rgba(98,230,240,0.3)' },
+  sleepClock: { fontFamily: fonts.sansBold, fontSize: 30, color: colors.text, fontVariant: ['tabular-nums'], marginTop: -4 },
+  sleepGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  sleepChip: { width: '23%', flexGrow: 1, alignItems: 'center', paddingVertical: 10, borderRadius: 10, backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border },
+  customRow: { flexDirection: 'row', gap: 8 },
+  customInput: { flex: 1, height: 44, borderRadius: 10, paddingHorizontal: 14, color: colors.text, fontFamily: fonts.sansBold, fontSize: 16, backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border, outlineStyle: 'none' } as object,
+  customStart: { height: 44, paddingHorizontal: 20, borderRadius: 10, backgroundColor: neon.accent, alignItems: 'center', justifyContent: 'center' },
   speedChip: { flex: 1, alignItems: 'center', paddingVertical: 10, borderRadius: 10, backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border },
 });

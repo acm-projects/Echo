@@ -1,10 +1,10 @@
 import Fastify, { type FastifyReply } from 'fastify';
 import cors from '@fastify/cors';
 import multipart from '@fastify/multipart';
-import { createHash, randomUUID } from 'node:crypto';
-import { mkdir, readFile, writeFile, access, readdir, stat, rm } from 'node:fs/promises';
-import { networkInterfaces } from 'node:os';
-import { createReadStream } from 'node:fs';
+import { createHash, createHmac, randomBytes, randomUUID } from 'node:crypto';
+import { mkdir, writeFile, access, readdir, stat, rm } from 'node:fs/promises';
+import { hostname, networkInterfaces } from 'node:os';
+import { createReadStream, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import path from 'node:path';
 import process from 'node:process';
@@ -12,8 +12,9 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { z } from 'zod';
 import Anthropic from '@anthropic-ai/sdk';
 import { zodOutputFormat } from '@anthropic-ai/sdk/helpers/zod';
-import { PDFParse } from 'pdf-parse';
-import AdmZip from 'adm-zip';
+import { chunkText, extractBook, gutenbergBook, wordCount, type ExtractedBook } from './book-text.js';
+import { clearLocalCopies, deleteKeys, deletePrefix, dropLocalCopies, initStorage, listKeys, localCopy, playbackSource, putBytes, putBytesKeepingLocal, putFile, readText, storageMode } from './storage.js';
+import { dbMode, deleteNarratorVoice, failInterruptedBooks, resetChapterAudio, getBookOwner, getStaleBookIds, getNarratorVoices, getVoiceUsage, initDb, setBookCast, setBookChapters, setBookDeleted, setBookFailed, setBookProcessing, setBookQueued, setBookReady, setBookSource, setChapterAudio, setChapterStatus, setCharacterVoice, setNarratorSample, setNarratorVoice, setSelectedNarrator, touchBook, userFromAuthorization } from './db.js';
 
 const SERVER_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const REPO_ROOT = path.resolve(SERVER_ROOT, '..');
@@ -23,7 +24,23 @@ const PYTHON = path.join(MODEL_ROOT, '.venv', 'bin', 'python');
 const WORKER = path.join(REPO_ROOT, 'workers', 'reader', 'reader.py');
 const MODEL_OUTPUTS = path.join(MODEL_ROOT, 'outputs');
 const FFMPEG = process.env.FFMPEG_PATH ?? 'ffmpeg';
-const SEGMENT_SILENCE_SECONDS = 0.2;
+// Silence between two lines, from how the first one ends: a comma is a breath ("…out there," June pleaded), a
+// sentence end a fuller stop. IndexTTS's own trailing silence is trimmed off (TRIM_EDGES), so this is the whole gap.
+const PAUSE_SECONDS = {
+  comma: Number(process.env.PAUSE_COMMA ?? 0.15),
+  clause: Number(process.env.PAUSE_CLAUSE ?? 0.3),
+  sentence: Number(process.env.PAUSE_SENTENCE ?? 0.5),
+  heading: Number(process.env.PAUSE_HEADING ?? 1.2),
+};
+
+function pauseAfter(text: string, kind: string) {
+  if (kind === 'heading') return PAUSE_SECONDS.heading;
+  const end = text.trim().replace(/["“”‘’')\]\s]+$/u, '').slice(-1);
+  if (end === ',') return PAUSE_SECONDS.comma;
+  if (';:—–-'.includes(end) && end !== '') return PAUSE_SECONDS.clause;
+  if ('.!?…'.includes(end) && end !== '') return PAUSE_SECONDS.sentence;
+  return PAUSE_SECONDS.comma;
+}
 
 const loadEnvFile = (process as typeof process & { loadEnvFile?: (file?: string) => void }).loadEnvFile;
 loadEnvFile?.(path.join(REPO_ROOT, '.env'));
@@ -65,10 +82,11 @@ const emotionVectorSchema = z.object({
   disgusted: emotionWeight, melancholic: emotionWeight, surprised: emotionWeight, calm: emotionWeight,
 });
 
+// A heading is a chapter or section title: read by the Narrator, followed by a longer pause.
 const segmentsSchema = z.object({
   segments: z.array(z.object({
     speaker: z.string().min(1),
-    kind: z.enum(['dialogue', 'narration']),
+    kind: z.enum(['dialogue', 'narration', 'heading']),
     text: z.string().min(1),
     emotion: z.string().min(1).max(120),
     emotionVector: emotionVectorSchema,
@@ -141,6 +159,17 @@ function shapeDialogueEmotion(vector: z.infer<typeof emotionVectorSchema>) {
   return { capped: shaped, changed: EMOTIONS.some((emotion) => shaped[emotion] !== vector[emotion]) };
 }
 
+// IndexTTS2 blends an emotion vector in place of the reference speaker's own delivery: with a total weight w, only
+// (1 - w) of the speaker's conditioning is left (infer_v2_5: emovec_mat + (1 - sum) * emovec). For a voice cloned from
+// someone's recording that loss is what makes it stop sounding like them, so clones get a fraction of the emotion and
+// no "calm", which only dilutes: the recording already carries the speaker's resting delivery. Designed voices are
+// unchanged.
+const CLONE_EMOTION_SCALE = Number(process.env.CLONE_EMOTION_SCALE ?? 0.5);
+const isClonedVoice = (voiceId: string | undefined) => Boolean(voiceId?.startsWith('upload_'));
+function cloneEmotion(vector: number[]) {
+  return EMOTIONS.map((emotion, index) => (emotion === 'calm' ? 0 : Math.round(vector[index] * CLONE_EMOTION_SCALE * 100) / 100));
+}
+
 // Volume offsets relative to the -16 LUFS target; IndexTTS can't whisper or shout on its own, and per-segment
 // leveling would otherwise play every line at the same loudness.
 const DELIVERY_GAIN_DB = { whisper: -10, soft: -5, normal: 0, loud: 2 } as const;
@@ -162,8 +191,26 @@ let worker: ChildProcessWithoutNullStreams | undefined;
 let workerBuffer = '';
 const pending = new Map<string, PendingJob>();
 
-// Track files created for each job for cleanup
-const jobFiles = new Map<string, Set<string>>();
+// Line audio (workers/indextts/outputs) still needed, by the chapters using it. Identical lines share one file, so a
+// file is deleted only when the last chapter using it has its MP3 safely in storage.
+const lineAudioUsers = new Map<string, Set<string>>();
+
+function useLineAudio(outputPath: string, user: string) {
+  const users = lineAudioUsers.get(outputPath) ?? new Set<string>();
+  users.add(user);
+  lineAudioUsers.set(outputPath, users);
+}
+
+/** Lets go of a chapter's line audio; with deleteUnused, files no other chapter is using are deleted. */
+async function releaseLineAudio(user: string, deleteUnused: boolean) {
+  const unused: string[] = [];
+  for (const [outputPath, users] of lineAudioUsers) {
+    if (!users.delete(user) || users.size) continue;
+    lineAudioUsers.delete(outputPath);
+    unused.push(outputPath);
+  }
+  if (deleteUnused) await Promise.all(unused.map((file) => rm(file, { force: true })));
+}
 
 function ensureConfiguration() {
   if (!GOOGLE_API_KEY) throw new Error('GOOGLE_API_KEY is not configured in the repository .env file.');
@@ -173,8 +220,36 @@ function ensureClaudeConfiguration() {
   if (!CLAUDE_API_KEY) throw new Error('ECHO_API_KEY or CLAUDE_API_KEY is not configured in the repository .env file.');
 }
 
+// The narration model takes most of a 16 GB Mac's memory, and two copies (two voice servers on one computer) crashed
+// it, so a lock file lets only one server on the machine run the worker at a time.
+const WORKER_LOCK = path.join(MODEL_ROOT, '.worker.lock');
+
+function workerLockHolder() {
+  let pid: number;
+  try {
+    pid = Number(readFileSync(WORKER_LOCK, 'utf8'));
+  } catch {
+    return undefined;
+  }
+  if (!pid || pid === process.pid) return undefined;
+  try {
+    process.kill(pid, 0);
+    return pid;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'EPERM' ? pid : undefined;
+  }
+}
+
+const releaseWorkerLock = () => {
+  if (workerLockHolder() === undefined) rmSync(WORKER_LOCK, { force: true });
+};
+process.on('exit', releaseWorkerLock);
+
 function startWorker() {
   if (worker) return worker;
+  const holder = workerLockHolder();
+  if (holder) throw new Error(`Another voice server on this computer (process ${holder}) is already running the narration model. Stop it first: two copies don't fit in memory.`);
+  writeFileSync(WORKER_LOCK, String(process.pid));
   worker = spawn(PYTHON, [WORKER], { cwd: MODEL_ROOT, stdio: ['pipe', 'pipe', 'pipe'] });
   worker.stdout.on('data', (chunk: Buffer) => {
     workerBuffer += chunk.toString();
@@ -205,6 +280,7 @@ function startWorker() {
     for (const job of pending.values()) job.reject(new Error(`IndexTTS worker exited with code ${code}.`));
     pending.clear();
     worker = undefined;
+    releaseWorkerLock();
   });
   return worker;
 }
@@ -241,13 +317,18 @@ async function generateVoicePreview(input: z.infer<typeof requestSchema>) {
   });
 }
 
-// Narrator voices: designed by Gemini, previewed with the cheaper lite TTS model, stored locally per user.
+// Narrator voices: designed by Gemini, previewed with the cheaper lite TTS model, stored per user.
 // Prompted voice design is only available on Gemini's default creation model (currently 3.8 Flash TTS),
 // so `voice.model` is omitted on creation; designed voices can then speak through any TTS model.
 const NARRATOR_PREVIEW_MODEL = process.env.NARRATOR_GEMINI_MODEL ?? 'gemini-3.8-flash-lite-tts';
 const NARRATOR_DAILY_LIMIT = 5;
-const NARRATOR_ROOT = path.join(SERVER_ROOT, 'data', 'narrators');
-const NARRATOR_STORE = path.join(NARRATOR_ROOT, 'narrators.json');
+// Uploaded recordings cost no Gemini credit, only this machine's time to render a preview.
+const UPLOAD_DAILY_LIMIT = 10;
+const UPLOAD_MAX_BYTES = 25 * 1024 * 1024;
+// IndexTTS clones from the first 15 s of a reference; a little more is kept so a slow start isn't all of it.
+const UPLOAD_CLIP_SECONDS = 20;
+const UPLOAD_MIN_SECONDS = 3;
+const REFERENCE_SAMPLE_RATE = 24000;
 const DEFAULT_NARRATOR_SAMPLE = 'The room beneath the stars was silent, except for the soft turning of a page. Somewhere far below, a door opened, and the story began.';
 
 const narratorRequestSchema = z.object({
@@ -256,6 +337,9 @@ const narratorRequestSchema = z.object({
   sampleText: z.string().trim().min(1).max(500).optional(),
 });
 
+// A voice in the studio: designed by Gemini from a description, or cloned from a recording the user uploaded.
+// Supabase's narrator_voices is the only record of a voice (is_selected marks the reader's narrator); its two clips
+// are in S3 at the row's reference_path and preview_path. Only signed-in readers have voices.
 type NarratorVoice = {
   id: string;
   userId: string;
@@ -263,60 +347,107 @@ type NarratorVoice = {
   description: string;
   sampleText: string;
   createdAt: string;
-  referencePath: string;
-  previewPath: string;
+  referenceKey: string;
+  previewKey: string;
+  kind: 'designed' | 'uploaded';
+  // An uploaded voice's preview is the recording itself until IndexTTS has read the sample line with it. Tracked in
+  // memory: after a restart the recording simply stays the preview.
+  previewPending: boolean;
 };
-type NarratorStore = { voices: NarratorVoice[]; selected: Record<string, string> };
-
-// Serializes read-modify-write cycles on the JSON store.
-let narratorStoreLock: Promise<unknown> = Promise.resolve();
+const voiceKind = (voice: NarratorVoice) => voice.kind;
+const previewsPending = new Set<string>();
 const narratorCreationsInFlight = new Map<string, number>();
 
-async function readNarratorStore(): Promise<NarratorStore> {
-  try {
-    return JSON.parse(await readFile(NARRATOR_STORE, 'utf8')) as NarratorStore;
-  } catch {
-    return { voices: [], selected: {} };
-  }
+/** The reader's voices, newest first, and which one is their narrator. */
+async function myVoices(who: Requester): Promise<{ voices: NarratorVoice[]; selectedId: string | null }> {
+  if (!who.signedIn) return { voices: [], selectedId: null };
+  const rows = await getNarratorVoices(who.id);
+  const voices = rows.map((row): NarratorVoice => ({
+    id: row.voice_id, userId: who.id, name: row.name, description: row.description, sampleText: row.sample_text, createdAt: row.created_at,
+    referenceKey: row.reference_path, previewKey: row.preview_path,
+    kind: row.voice_id.startsWith('upload_') ? 'uploaded' : 'designed', previewPending: previewsPending.has(row.voice_id),
+  })).sort((x, y) => y.createdAt.localeCompare(x.createdAt));
+  return { voices, selectedId: rows.find((row) => row.is_selected)?.voice_id ?? null };
 }
 
-function updateNarratorStore<T>(change: (store: NarratorStore) => T | Promise<T>) {
-  const run = narratorStoreLock.then(async () => {
-    const store = await readNarratorStore();
-    const result = await change(store);
-    await writeFile(NARRATOR_STORE, JSON.stringify(store, null, 2));
-    return result;
-  });
-  narratorStoreLock = run.catch(() => {});
-  return run;
+const findVoice = async (who: Requester, voiceId: string) => (await myVoices(who)).voices.find((voice) => voice.id === voiceId);
+
+// The Voice Studio spends Gemini quota and model time, so it's for signed-in readers only.
+function needsAccount(who: Requester, reply: FastifyReply) {
+  if (who.signedIn) return false;
+  void reply.code(401).send({ error: 'Sign in to use the Voice Studio.' });
+  return true;
 }
 
 function narratorUserId(request: { headers: Record<string, string | string[] | undefined> }) {
-  const header = request.headers['x-e`cho-user'];
+  const header = request.headers['x-echo-user'];
   const value = (Array.isArray(header) ? header[0] : header)?.trim();
   return value && /^[a-zA-Z0-9_-]{1,64}$/.test(value) ? value : 'local';
 }
+
+// Who a request is for. A verified Supabase session makes the signed-in user the owner, and only then are rows
+// written to Supabase. The x-echo-user id (the app's mock user) stays as `testId` only so books made before sign-in
+// existed can still be opened by the device that made them.
+type Requester = { id: string; testId: string; signedIn: boolean };
+
+async function requester(request: { headers: Record<string, string | string[] | undefined> }): Promise<Requester> {
+  const testId = narratorUserId(request);
+  const userId = await userFromAuthorization(request.headers.authorization).catch(() => undefined);
+  return { id: userId ?? testId, testId, signedIn: Boolean(userId) };
+}
+
 
 function localDay(date: Date) {
   return date.toLocaleDateString('en-CA');
 }
 
-function narratorQuota(store: NarratorStore, userId: string) {
+function narratorQuota(voices: NarratorVoice[]) {
   const today = localDay(new Date());
-  const usedToday = store.voices.filter((voice) => voice.userId === userId && localDay(new Date(voice.createdAt)) === today).length;
+  const madeToday = (kind: 'designed' | 'uploaded') => voices.filter((voice) => voiceKind(voice) === kind && localDay(new Date(voice.createdAt)) === today).length;
+  const usedToday = madeToday('designed');
+  const uploadsToday = madeToday('uploaded');
   const resetsAt = new Date();
   resetsAt.setHours(24, 0, 0, 0);
-  return { dailyLimit: NARRATOR_DAILY_LIMIT, usedToday, remainingToday: Math.max(0, NARRATOR_DAILY_LIMIT - usedToday), resetsAt: resetsAt.toISOString() };
+  return {
+    dailyLimit: NARRATOR_DAILY_LIMIT, usedToday, remainingToday: Math.max(0, NARRATOR_DAILY_LIMIT - usedToday),
+    uploadDailyLimit: UPLOAD_DAILY_LIMIT, uploadsToday, uploadsRemainingToday: Math.max(0, UPLOAD_DAILY_LIMIT - uploadsToday),
+    resetsAt: resetsAt.toISOString(),
+  };
 }
 
-function publicNarrator(voice: NarratorVoice) {
-  return { id: voice.id, name: voice.name, description: voice.description, sampleText: voice.sampleText, createdAt: voice.createdAt, previewUrl: `/api/narrators/${encodeURIComponent(voice.id)}/audio` };
+type VoiceUsage = Map<string, Array<{ bookId: string; title: string; as: string[] }>>;
+
+// Which books read with each voice (as the narrator, or as a character the reader gave it to). Only books recorded in
+// Supabase are known; test-mode books aren't.
+async function voiceUsage(who: Requester, voices: NarratorVoice[]): Promise<VoiceUsage> {
+  const usage: VoiceUsage = new Map();
+  if (!who.signedIn) return usage;
+  const uses = await getVoiceUsage(who.id, voices.map((voice) => voice.id)).catch((error: unknown) => {
+    app.log.warn({ error }, 'Could not read voice usage from Supabase');
+    return [];
+  });
+  for (const use of uses) {
+    const books = usage.get(use.voiceId) ?? [];
+    const book = books.find((item) => item.bookId === use.bookId) ?? (books.push({ bookId: use.bookId, title: use.title, as: [] }), books.at(-1)!);
+    book.as.push(use.character);
+    usage.set(use.voiceId, books);
+  }
+  return usage;
 }
 
-async function narratorState(userId: string) {
-  const store = await readNarratorStore();
-  const voices = store.voices.filter((voice) => voice.userId === userId).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-  return { voices: voices.map(publicNarrator), selectedId: store.selected[userId] ?? null, previewModel: NARRATOR_PREVIEW_MODEL, ...narratorQuota(store, userId) };
+// previewPath is played through /api/media/url like any stored audio, so only the voice's owner can hear it.
+function publicNarrator(voice: NarratorVoice, usage?: VoiceUsage) {
+  return {
+    id: voice.id, name: voice.name, description: voice.description, sampleText: voice.sampleText, createdAt: voice.createdAt,
+    kind: voice.kind, previewPath: voice.previewKey, previewPending: voice.previewPending,
+    usedIn: usage?.get(voice.id) ?? [],
+  };
+}
+
+async function narratorState(who: Requester) {
+  const { voices, selectedId } = await myVoices(who);
+  const usage = await voiceUsage(who, voices);
+  return { voices: voices.map((voice) => publicNarrator(voice, usage)), selectedId, previewModel: NARRATOR_PREVIEW_MODEL, ...narratorQuota(voices) };
 }
 
 async function speakWithVoice(model: string, voiceId: string, text: string) {
@@ -332,7 +463,8 @@ async function speakWithVoice(model: string, voiceId: string, text: string) {
   return Buffer.from(audio.data, 'base64');
 }
 
-async function createNarratorVoice(userId: string, input: z.infer<typeof narratorRequestSchema>) {
+async function createNarratorVoice(who: Requester, input: z.infer<typeof narratorRequestSchema>) {
+  const userId = who.id;
   const voice = await postJson('https://generativelanguage.googleapis.com/v1beta/voices', {
     store: true,
     voice: {
@@ -344,46 +476,84 @@ async function createNarratorVoice(userId: string, input: z.infer<typeof narrato
   });
   if (!voice.id || !voice.sample_audio?.data) throw new Error('Gemini did not return a narrator voice.');
   const sampleText = input.sampleText ?? DEFAULT_NARRATOR_SAMPLE;
-  const fileBase = voice.id.replace(/[^a-zA-Z0-9_-]/g, '_');
-  const referencePath = path.join(NARRATOR_ROOT, `${fileBase}-reference.wav`);
-  const previewPath = path.join(NARRATOR_ROOT, `${fileBase}-preview.wav`);
+  const folder = `narrators/${userId}/${voice.id.replace(/[^a-zA-Z0-9_-]/g, '_')}`;
+  const referenceKey = `${folder}/reference.wav`;
+  const previewKey = `${folder}/preview.wav`;
   // Gemini's design sample is a long, neutral read, which makes the better IndexTTS cloning reference.
-  await writeFile(referencePath, Buffer.from(voice.sample_audio.data, 'base64'));
-  await writeFile(previewPath, await speakWithVoice(NARRATOR_PREVIEW_MODEL, voice.id, sampleText));
-  const narrator: NarratorVoice = { id: voice.id, userId, name: input.name, description: input.description, sampleText, createdAt: new Date().toISOString(), referencePath, previewPath };
-  await updateNarratorStore((store) => {
-    store.voices.push(narrator);
-    store.selected[userId] ??= narrator.id;
-  });
+  await putBytes(referenceKey, Buffer.from(voice.sample_audio.data, 'base64'));
+  await putBytes(previewKey, await speakWithVoice(NARRATOR_PREVIEW_MODEL, voice.id, sampleText));
+  const narrator: NarratorVoice = { id: voice.id, userId, name: input.name, description: input.description, sampleText, createdAt: new Date().toISOString(), referenceKey, previewKey, kind: 'designed', previewPending: false };
+  // The reader's first voice becomes their narrator.
+  const selected = !(await myVoices(who)).selectedId;
+  await setNarratorVoice({ userId, voiceId: narrator.id, name: narrator.name, description: narrator.description, sampleText, referencePath: referenceKey, previewPath: previewKey, selected });
   return narrator;
 }
 
-async function selectedNarratorReference(userId: string) {
-  const store = await readNarratorStore();
-  const voice = store.voices.find((item) => item.userId === userId && item.id === store.selected[userId]);
-  if (!voice) return undefined;
-  return access(voice.referencePath).then(() => voice.referencePath, () => undefined);
+// A voice cloned from the reader's own recording. The clip is made mono at the model's rate with any silent lead-in
+// cut, and becomes the cloning reference. It doubles as the preview until IndexTTS has read the sample line with it.
+async function createUploadedVoice(who: Requester, input: { name: string; fileName: string; buffer: Buffer }) {
+  const id = `upload_${randomBytes(6).toString('hex')}`;
+  const extension = path.extname(input.fileName).toLowerCase().replace(/[^a-z0-9.]/g, '') || '.bin';
+  const rawPath = path.join(TMP_ROOT, `${id}-raw${extension}`);
+  const clipPath = path.join(TMP_ROOT, `${id}-clip.wav`);
+  try {
+    await writeFile(rawPath, input.buffer);
+    await runProcess(FFMPEG, [
+      '-y', '-i', rawPath,
+      '-af', `silenceremove=start_periods=1:start_threshold=-45dB:start_silence=0.1,aresample=${REFERENCE_SAMPLE_RATE}`,
+      '-t', String(UPLOAD_CLIP_SECONDS), '-ac', '1', '-c:a', 'pcm_s16le', clipPath,
+    ]).catch((error: unknown) => {
+      throw new Error(`That file couldn't be read as audio. Use a WAV, MP3, M4A or OGG recording. (${error instanceof Error ? error.message.split('\n').at(-1) : error})`);
+    });
+    const seconds = ((await stat(clipPath)).size - 44) / (REFERENCE_SAMPLE_RATE * 2);
+    if (seconds < UPLOAD_MIN_SECONDS) throw new Error(`The recording needs at least ${UPLOAD_MIN_SECONDS} seconds of speech; this one has ${seconds.toFixed(1)}.`);
+    const folder = `narrators/${who.id}/${id}`;
+    const referenceKey = `${folder}/reference.wav`;
+    const previewKey = `${folder}/preview.wav`;
+    const clip = readFileSync(clipPath);
+    await putBytesKeepingLocal(referenceKey, clip);
+    await putBytes(previewKey, clip);
+    const narrator: NarratorVoice = {
+      id, userId: who.id, name: input.name, description: `Cloned from your recording (${Math.round(seconds)} s).`, sampleText: DEFAULT_NARRATOR_SAMPLE,
+      createdAt: new Date().toISOString(), referenceKey, previewKey, kind: 'uploaded', previewPending: true,
+    };
+    const selected = !(await myVoices(who)).selectedId;
+    await setNarratorVoice({ userId: who.id, voiceId: id, name: narrator.name, description: narrator.description, sampleText: narrator.sampleText, referencePath: referenceKey, previewPath: previewKey, selected });
+    previewsPending.add(id);
+    void renderNarratorPreview(narrator);
+    return narrator;
+  } finally {
+    await rm(rawPath, { force: true });
+    await rm(clipPath, { force: true });
+  }
 }
 
-async function extractBookText(fileName: string, buffer: Buffer) {
-  const extension = path.extname(fileName).toLowerCase();
-  if (extension === '.pdf') {
-    const parser = new PDFParse({ data: buffer });
-    const result = await parser.getText();
-    await parser.destroy();
-    // pdf-parse inserts "-- 1 of 2 --" page markers, which would otherwise be narrated.
-    return result.text.replace(/^-- \d+ of \d+ --$/gm, '').replace(/\n{3,}/g, '\n\n').trim();
+// Reads the sample line in the cloned voice, so the studio preview is what books will sound like. Runs after the
+// upload has been answered: the model can take a minute to load, longer than a phone waits on a request.
+async function renderNarratorPreview(voice: NarratorVoice) {
+  try {
+    const referencePath = await localCopy(voice.referenceKey);
+    if (!referencePath) throw new Error('reference missing');
+    // Read the way books read a cloned voice: the speaker's own delivery and pace (see cloneEmotion).
+    const neutral = cloneEmotion(EMOTIONS.map((emotion) => (emotion === 'calm' ? 0.5 : 0)));
+    const outputPath = await runIndexTts(referencePath, voice.sampleText, 'calm, even narration', neutral, pacingFor(voice.sampleText, true, true));
+    await putFile(voice.previewKey, outputPath);
+    await rm(outputPath, { force: true });
+    previewsPending.delete(voice.id);
+    app.log.info({ voiceId: voice.id }, 'Uploaded voice preview rendered');
+  } catch (error) {
+    // The recording itself stays as the preview.
+    app.log.warn({ voiceId: voice.id, error: error instanceof Error ? error.message : error }, 'Uploaded voice preview not rendered');
+    previewsPending.delete(voice.id);
   }
-  if (extension === '.txt' || extension === '.md') return buffer.toString('utf8').trim();
-  if (extension === '.epub') {
-    const zip = new AdmZip(buffer);
-    const html = zip.getEntries()
-      .filter((entry) => /\.(x?html?|htm)$/i.test(entry.entryName))
-      .map((entry) => entry.getData().toString('utf8'))
-      .join('\n');
-    return html.replace(/<script[\s\S]*?<\/script>/gi, ' ').replace(/<style[\s\S]*?<\/style>/gi, ' ').replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/\s+/g, ' ').trim();
-  }
-  throw new Error('Supported book formats are PDF, EPUB, TXT, and MD.');
+}
+
+async function selectedNarrator(who: Requester) {
+  const { voices, selectedId } = await myVoices(who);
+  const voice = voices.find((item) => item.id === selectedId);
+  if (!voice) return undefined;
+  const referencePath = await localCopy(voice.referenceKey);
+  return referencePath ? { voice, referencePath } : undefined;
 }
 
 const anthropic = CLAUDE_API_KEY ? new Anthropic({ apiKey: CLAUDE_API_KEY }) : undefined;
@@ -469,26 +639,60 @@ async function createCharacterVoice(character: z.infer<typeof rosterSchema>['cha
   throw new Error(lastError);
 }
 
-// Compiled books, their intermediates, and character references are prefixed so they are never mistaken for a Voice Lab narrator.
-const GENERATED_TMP_FILE = /^([0-9a-f]{8}-[0-9a-f]{4}-|char-)/i;
-
+// Voice Lab keeps each Gemini reference under voice-lab/; the newest one narrates books for users with no narrator.
 async function latestNarratorReference() {
-  const files = (await readdir(TMP_ROOT)).filter((file) => file.endsWith('.wav') && !GENERATED_TMP_FILE.test(file));
-  if (!files.length) throw new Error('No existing Gemini narrator reference WAV was found in server/tmp. Generate one in Voice Lab first.');
-  const entries = await Promise.all(files.map(async (file) => ({ file, modified: (await stat(path.join(TMP_ROOT, file))).mtimeMs })));
+  const entries = (await listKeys('voice-lab/')).filter(({ key }) => key.endsWith('.wav'));
+  if (!entries.length) throw new Error('No Voice Lab narrator reference was found. Create a narrator or generate one in Voice Lab first.');
   entries.sort((a, b) => b.modified - a.modified);
-  return path.join(TMP_ROOT, entries[0].file);
+  const referencePath = await localCopy(entries[0].key);
+  if (!referencePath) throw new Error('The newest Voice Lab narrator reference could not be downloaded.');
+  return { key: entries[0].key, referencePath };
 }
 
-function runIndexTts(referencePath: string, text: string, emotion: string, emotionVector?: number[]) {
+// IndexTTS reads a little slowly for audiobook narration. A duration factor below 1 makes the same voice speak faster
+// at the same pitch (it shortens the generated speech rather than speeding up the audio).
+const NARRATOR_PACE = Number(process.env.NARRATOR_PACE ?? 0.9);
+// Short narrator lines between dialogue ("June pleaded.") come out drawn out at the narration pace, so they're
+// quickened a little more. 0.85 was too fast (it squeezed the pauses inside them), 0.9 too slow; 0.875 splits it.
+const SPEECH_TAG_PACE = Number(process.env.SPEECH_TAG_PACE ?? 0.875);
+const SPEECH_TAG_MAX_WORDS = 8;
+// A cloned voice keeps its owner's own pace: the duration factor stretches the whole clip, which shifts the timbre.
+// Its speech tags get the same relative quickening as a designed voice's (0.875 / 0.9).
+const CLONE_PACE = Number(process.env.CLONE_PACE ?? 1);
+// IndexTTS generates 50 speech tokens a second, and on very short text it tends to run on past the words. Lines of
+// up to 12 words are capped at the length of slow speech (1.5 words a second) plus a second of slack.
+const SPEECH_TOKENS_PER_SECOND = 50;
+const SHORT_LINE_MAX_WORDS = 12;
+// IndexTTS's default beam search (3 beams) runs its slowest step three times over. 1 is the lever to try for speed;
+// kept at the default until the two have been compared by ear.
+const INDEXTTS_NUM_BEAMS = Number(process.env.INDEXTTS_NUM_BEAMS ?? 3);
+
+function pacingFor(text: string, isNarration: boolean, cloned = false) {
+  const words = wordCount(text);
+  return {
+    durationFactor: !isNarration ? (cloned ? CLONE_PACE : 1)
+      : (cloned ? CLONE_PACE : NARRATOR_PACE) * (words <= SPEECH_TAG_MAX_WORDS ? SPEECH_TAG_PACE / NARRATOR_PACE : 1),
+    maxMelTokens: words <= SHORT_LINE_MAX_WORDS ? Math.ceil((words / 1.5 + 1) * SPEECH_TOKENS_PER_SECOND) : undefined,
+  };
+}
+
+type Pacing = { durationFactor?: number; maxMelTokens?: number };
+
+// user: the chapter the line is for, which keeps the file from being cleaned up until that chapter is saved. It's
+// registered before the cache check, so another chapter finishing can't delete the file between the check and its use.
+function runIndexTts(referencePath: string, text: string, emotion: string, emotionVector?: number[], pacing: Pacing = {}, user?: string) {
   const jobId = randomUUID();
-  const digest = createHash('sha256').update(`${referencePath}:${text}:${emotion}:${emotionVector?.join(',') ?? ''}`).digest('hex').slice(0, 20);
+  const { durationFactor = 1, maxMelTokens } = pacing;
+  // Default pacing keeps the old cache key, so audio made before pacing existed is still reused.
+  const pacingKey = durationFactor !== 1 || maxMelTokens ? `:${durationFactor}:${maxMelTokens ?? ''}` : '';
+  const digest = createHash('sha256').update(`${referencePath}:${text}:${emotion}:${emotionVector?.join(',') ?? ''}${pacingKey}`).digest('hex').slice(0, 20);
   const outputPath = path.join(MODEL_OUTPUTS, `${digest}.wav`);
+  if (user) useLineAudio(outputPath, user);
   return access(outputPath).then(
     () => outputPath,
     () => new Promise<string>((resolve, reject) => {
       pending.set(jobId, { resolve, reject });
-      startWorker().stdin.write(`${JSON.stringify({ jobId, referencePath, outputPath, text, emotion, emotionVector, language: 'EN' })}\n`);
+      startWorker().stdin.write(`${JSON.stringify({ jobId, referencePath, outputPath, text, emotion, emotionVector, durationFactor, maxMelTokens, numBeams: INDEXTTS_NUM_BEAMS, language: 'EN' })}\n`);
     }),
   );
 }
@@ -525,6 +729,10 @@ const SAMPLE_RATE = 22050;
 const PCM_ARGS = ['-ar', String(SAMPLE_RATE), '-ac', '1', '-c:a', 'pcm_s16le'];
 const LOUDNORM_TARGETS = `I=${TARGET_LUFS}:TP=${TARGET_TRUE_PEAK}:LRA=${TARGET_LRA}`;
 
+// IndexTTS pads each clip with up to half a second of silence, which drags short lines out; the gap between segments
+// comes from pauseAfter instead. -50 dB sits below a whisper, and the reverse pass trims the end.
+const TRIM_EDGES = 'silenceremove=start_periods=1:start_threshold=-50dB:start_silence=0.05,areverse,silenceremove=start_periods=1:start_threshold=-50dB:start_silence=0.08,areverse';
+
 type LoudnessMeasurement = { input_i: string; input_tp: string; input_lra: string; input_thresh: string; target_offset: string };
 
 // First pass of ffmpeg's two-pass loudnorm: measures the file without writing audio.
@@ -536,8 +744,9 @@ async function measureLoudness(filePath: string) {
 
 // Each segment is gain-matched to the target (plus its delivery offset) so voices sit at the same level,
 // then the whole book gets one linear gain so the final file lands on -16 LUFS.
-// gainOffsetDb shifts a segment's target away from -16 LUFS (e.g. -10 dB for a whisper).
-async function stitchSegments(jobId: string, segments: Array<{ path: string; gainOffsetDb: number }>) {
+// gainOffsetDb shifts a segment's target away from -16 LUFS (e.g. -10 dB for a whisper); pauseAfterSec is the silence
+// before the next segment (see pauseAfter).
+async function stitchSegments(jobId: string, segments: Array<{ path: string; gainOffsetDb: number; pauseAfterSec: number }>) {
   if (!segments.length) throw new Error('Cannot stitch an empty segment list.');
 
   const workDir = path.join(TMP_ROOT, `${jobId}-segments`);
@@ -546,8 +755,16 @@ async function stitchSegments(jobId: string, segments: Array<{ path: string; gai
   const mp3Path = path.join(TMP_ROOT, `${jobId}.mp3`);
   await mkdir(workDir, { recursive: true });
   try {
-    const silencePath = path.join(workDir, 'silence.wav');
-    await runProcess(FFMPEG, ['-y', '-f', 'lavfi', '-t', String(SEGMENT_SILENCE_SECONDS), '-i', `anullsrc=r=${SAMPLE_RATE}:cl=mono`, ...PCM_ARGS, silencePath]);
+    const silences = new Map<number, string>();
+    const silenceFor = async (seconds: number) => {
+      let silencePath = silences.get(seconds);
+      if (!silencePath) {
+        silencePath = path.join(workDir, `silence-${Math.round(seconds * 1000)}.wav`);
+        await runProcess(FFMPEG, ['-y', '-f', 'lavfi', '-t', String(seconds), '-i', `anullsrc=r=${SAMPLE_RATE}:cl=mono`, ...PCM_ARGS, silencePath]);
+        silences.set(seconds, silencePath);
+      }
+      return silencePath;
+    };
 
     const leveledPaths = await mapWithConcurrency(segments, 4, async ({ path: segmentPath, gainOffsetDb }, index) => {
       const measured = Number((await measureLoudness(segmentPath)).input_i);
@@ -556,7 +773,7 @@ async function stitchSegments(jobId: string, segments: Array<{ path: string; gai
       const leveledPath = path.join(workDir, `${String(index).padStart(5, '0')}.wav`);
       await runProcess(FFMPEG, [
         '-y', '-i', segmentPath,
-        '-af', `aresample=${SAMPLE_RATE},volume=${gain.toFixed(2)}dB,alimiter=limit=0.84:level=0`,
+        '-af', `aresample=${SAMPLE_RATE},${TRIM_EDGES},volume=${gain.toFixed(2)}dB,alimiter=limit=0.84:level=0`,
         ...PCM_ARGS, leveledPath,
       ]);
       return leveledPath;
@@ -564,7 +781,20 @@ async function stitchSegments(jobId: string, segments: Array<{ path: string; gai
 
     const listPath = path.join(workDir, 'list.txt');
     const quote = (file: string) => `file '${file.replace(/'/g, "'\\''")}'`;
-    const entries = leveledPaths.flatMap((file, index) => (index < leveledPaths.length - 1 ? [file, silencePath] : [file]));
+    const entries: string[] = [];
+    // When each segment starts in the finished file (16-bit mono PCM, so a file's size gives its length).
+    const startsSec: number[] = [];
+    let elapsedSec = 0;
+    for (const [index, file] of leveledPaths.entries()) {
+      startsSec.push(Math.round(elapsedSec * 100) / 100);
+      entries.push(file);
+      elapsedSec += ((await stat(file)).size - 44) / (SAMPLE_RATE * 2);
+      if (index < leveledPaths.length - 1) {
+        const gapSec = segments[index].pauseAfterSec;
+        entries.push(await silenceFor(gapSec));
+        elapsedSec += gapSec;
+      }
+    }
     await writeFile(listPath, `${entries.map(quote).join('\n')}\n`);
     await runProcess(FFMPEG, ['-y', '-f', 'concat', '-safe', '0', '-i', listPath, ...PCM_ARGS, premasterPath]);
 
@@ -578,7 +808,7 @@ async function stitchSegments(jobId: string, segments: Array<{ path: string; gai
       ...PCM_ARGS, wavPath,
     ]);
     await runProcess(FFMPEG, ['-y', '-i', wavPath, '-codec:a', 'libmp3lame', '-q:a', '4', mp3Path]);
-    return { wavPath, mp3Path };
+    return { wavPath, mp3Path, startsSec };
   } finally {
     await rm(workDir, { recursive: true, force: true });
     await rm(premasterPath, { force: true });
@@ -588,9 +818,37 @@ async function stitchSegments(jobId: string, segments: Array<{ path: string; gai
 const app = Fastify({ logger: true, bodyLimit: 50 * 1024 * 1024 });
 await app.register(cors, { origin: true, methods: ['GET', 'HEAD', 'POST', 'PUT', 'DELETE'] });
 await app.register(multipart, { limits: { fileSize: 50 * 1024 * 1024, files: 1 } });
+
+// Routes that spend money or model time (Claude, Gemini, IndexTTS) need a signed-in reader, so the server can't be
+// run up by anyone who can reach it. Checked here, in one place, before any route runs. The local voice playground
+// is a dev tool and also answers requests from this computer itself.
+const SIGNED_IN_ONLY = new Set([
+  'POST /api/books/process',
+  'POST /api/books/import',
+  'PUT /api/books/:jobId/cast',
+  'POST /api/books/:jobId/retry',
+  'POST /api/books/:jobId/renarrate',
+  'POST /api/voice/generate',
+  'POST /api/cleanup',
+  'GET /api/narrators',
+  'POST /api/narrators',
+  'POST /api/narrators/upload',
+  'PUT /api/narrators/selected',
+  'DELETE /api/narrators/:voiceId',
+]);
+const fromThisComputer = (ip: string) => ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1';
+app.addHook('preHandler', async (request, reply) => {
+  const route = `${request.method} ${request.routeOptions.url ?? ''}`;
+  const playground = request.method !== 'GET' && (request.routeOptions.url ?? '').startsWith('/api/playground/');
+  if (!SIGNED_IN_ONLY.has(route) && !playground) return;
+  if (playground && fromThisComputer(request.ip)) return;
+  if (await userFromAuthorization(request.headers.authorization).catch(() => undefined)) return;
+  return reply.code(401).send({ error: route.includes('/narrators') ? 'Sign in to use the Voice Studio.' : 'Sign in to do that. Narrating and making voices need an Echo account.' });
+});
 await mkdir(TMP_ROOT, { recursive: true });
 await mkdir(MODEL_OUTPUTS, { recursive: true });
-await mkdir(NARRATOR_ROOT, { recursive: true });
+await initStorage(SERVER_ROOT);
+initDb();
 
 app.get('/health', async () => ({
   ok: true,
@@ -598,13 +856,27 @@ app.get('/health', async () => ({
   model: GEMINI_MODEL,
   indexTtsCheckpointPath: MODEL_ROOT,
   claudeKeyConfigured: Boolean(CLAUDE_API_KEY),
+  storage: storageMode,
+  supabase: dbMode,
 }));
+
+type JobChapter = { index: number; title: string; status: 'queued' | 'processing' | 'ready' | 'failed'; audioKey?: string; durationMs?: number; error?: string };
+
+// A member of the cast as the app shows it: who they are, the voice they'll be read with, and where it came from.
+type CastEntry = { name: string; gender: string; voiceDescription: string; samplePath?: string; source: 'designed' | 'narrator'; narratorId?: string; narratorName?: string; hasDesigned: boolean };
 
 type BookJob = {
   status: 'processing' | 'done' | 'error';
   stage: string;
   userId: string;
+  // Whether userId is a signed-in account (see isOwner).
+  account: boolean;
   updatedAt: string;
+  // Each chapter's progress, so the app can play finished chapters while later ones are still being narrated.
+  chapters?: JobChapter[];
+  // The voices are ready and narration waits for the reader to approve or change them.
+  awaitingCast?: boolean;
+  cast?: CastEntry[];
   result?: unknown;
   error?: string;
 };
@@ -612,108 +884,527 @@ type BookJob = {
 // and longer than an app may stay foregrounded, so clients start a job and poll its status instead.
 const bookJobs = new Map<string, BookJob>();
 
-async function processBook(jobId: string, bookText: string, userId: string) {
-  const setStage = (stage: string) => {
-    bookJobs.set(jobId, { ...bookJobs.get(jobId)!, stage, updatedAt: new Date().toISOString() });
-  };
-  jobFiles.set(jobId, new Set());
-  try {
-    setStage('Reading the book with Claude');
-    app.log.info('Calling Claude to extract roster');
-    const roster = await claudeStructuredOutput(
-      'extract_roster',
-      'Extract a stable character roster from the book excerpt. Always include Narrator. Voice descriptions must be safe, generic audio descriptions of adult voices.',
-      `Build a character roster for this book text. For each speaking character include the canonical name, aliases, gender (female, male, or neutral, inferred from names, pronouns, and context), and a voiceDescription of their permanent vocal traits. State the gender explicitly in every voiceDescription. Include Narrator.\n\n${VOICE_SAFETY_RULES}\n\nBook text:\n${bookText.slice(0, 30000)}`,
-      rosterSchema,
-      'low',
-    );
-    app.log.info({ characterCount: roster.characters.length }, 'Roster extracted');
+// Everything a book keeps sits under books/<jobId>/: the uploaded file, the finished audio (audio.mp3 for a one-chapter
+// book, chapters/000.mp3... otherwise), its manifest, job state, and the character voice references.
+const bookFolder = (jobId: string) => `books/${jobId}`;
+const chapterAudioKey = (jobId: string, index: number, chapterCount: number) =>
+  chapterCount > 1 ? `${bookFolder(jobId)}/chapters/${String(index).padStart(3, '0')}.mp3` : `${bookFolder(jobId)}/audio.mp3`;
+const jobStateKey = (jobId: string) => `${bookFolder(jobId)}/job.json`;
+// One marker per book still being narrated, so a restarted server carries on where it stopped. A marker names its
+// machine, so two servers sharing a bucket don't both pick the same book up.
+const activeMarkerFolder = (jobId: string) => `jobs/active/${jobId}/`;
+const SERVER_NAME = hostname();
+const isBookId = (value: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
 
-    const chunks = [];
-    // Smaller chunks leave output-token room for an emotion vector on every segment.
-    for (let offset = 0; offset < bookText.length; offset += 8000) chunks.push(bookText.slice(offset, offset + 8000));
-    app.log.info({ chunkCount: chunks.length }, 'Text split into chunks');
-    const allSegments: z.infer<typeof segmentsSchema>['segments'] = [];
-    for (const [chunkIndex, chunk] of chunks.entries()) {
-      setStage(`Splitting scenes (${chunkIndex + 1}/${chunks.length})`);
-      const parsed = await claudeStructuredOutput(
-        'split_segments',
-        'Split the provided book chunk into ordered narration and dialogue segments. Use only roster names, preserve text verbatim, and score the emotion that should guide delivery.',
-        `Use this roster consistently:\n${JSON.stringify(roster.characters.map(({ name, aliases }) => ({ name, aliases })))}\n\nSplit this chunk into ordered segments. Do not summarize or rewrite the text. Narration and speech tags ("she said") use the Narrator speaker.\n\n${EMOTION_GUIDE}\n\nChunk:\n${chunk}`,
-        segmentsSchema,
-        'medium',
-      );
-      allSegments.push(...parsed.segments);
+// Smaller chunks leave output-token room for an emotion vector on every segment.
+const SEGMENT_CHUNK_CHARS = 8000;
+// Claude calls for one chapter's chunks are independent, so a few run at once.
+const SEGMENT_CONCURRENCY = 3;
+// The cast is read from the book's opening; chapters past it are checked for new speakers before they're split.
+const ROSTER_EXCERPT_CHARS = 30000;
+// A narrating book touches its Supabase row this often; one silent for STALE_MINUTES is swept as interrupted.
+const HEARTBEAT_MS = 2 * 60_000;
+const STALE_MINUTES = 15;
+
+type Roster = z.infer<typeof rosterSchema>;
+type RosterCharacter = Roster['characters'][number];
+type Segment = z.infer<typeof segmentsSchema>['segments'][number];
+const newCharactersSchema = z.object({ characters: z.array(rosterSchema.shape.characters.element) });
+
+type ChapterState = { index: number; title: string; text: string; startOffset: number; status: JobChapter['status']; audioKey?: string; durationMs?: number; error?: string };
+// source: designed by Gemini for this book, or one of the reader's studio voices (then narratorId/label say which).
+type VoiceRef = { voiceId?: string; referenceKey: string; samplePath: string; source?: 'designed' | 'narrator'; narratorId?: string; label?: string };
+type TimelineEntry = { startSec: number; speaker: string };
+
+// Everything needed to carry a book on after a restart, a retry or a change of narrator, saved at books/<id>/job.json:
+// the chapters, Claude's cast and scene splits, and the S3 keys of every voice's reference recording.
+type JobState = {
+  jobId: string;
+  userId: string;
+  testId: string;
+  signedIn: boolean;
+  server: string;
+  sourceKey: string;
+  title: string;
+  author?: string;
+  characterVoices: boolean;
+  status: BookJob['status'];
+  error?: string;
+  chapters: ChapterState[];
+  roster?: Roster;
+  castReady?: boolean;
+  // With character voices, narration waits after the voices are made until the reader approves the cast.
+  reviewCast?: boolean;
+  castApproved?: boolean;
+  voices: Record<string, VoiceRef>;
+  // The Gemini voice made for each character, kept so a swapped character can go back to it.
+  designedVoices?: Record<string, VoiceRef>;
+  segments: Record<string, Segment[]>;
+  narrated: Record<string, { audioKey: string; durationMs: number; timeline: TimelineEntry[]; segments: unknown[] }>;
+};
+
+// Books narrating on this server (with their state, so cleanup can see which voices they still use), and books
+// removed mid-narration (their run stops at the next line).
+const running = new Map<string, JobState>();
+const cancelled = new Set<string>();
+// Books whose reader pressed Stop: the run ends at the next line and the book goes back to its cast review.
+const stopping = new Set<string>();
+// Settles when a book's run ends, so a stop can answer once narration has actually halted.
+const runDone = new Map<string, Promise<void>>();
+// Books whose voices are made and wait for the reader's approval. Kept in memory so a cast change edits the same state
+// the (still running) scene splitting writes to, and the approval carries it on without reloading.
+const waitingBooks = new Map<string, JobState>();
+
+async function loadJob(jobId: string) {
+  const text = await readText(jobStateKey(jobId)).catch(() => undefined);
+  return text ? (JSON.parse(text) as JobState) : undefined;
+}
+
+const awaitingCast = (state: JobState) => Boolean(state.reviewCast && state.castReady && !state.castApproved);
+
+// The voice Gemini designed for a character. Books made before designedVoices existed only have it while it's still
+// in use (an unlabelled entry in voices).
+const designedVoiceOf = (state: JobState, name: string) =>
+  state.designedVoices?.[name] ?? (name !== 'Narrator' && state.voices[name] && !state.voices[name].source ? state.voices[name] : undefined);
+
+function castOf(state: JobState): CastEntry[] {
+  const narrator = state.voices.Narrator;
+  return (state.roster?.characters ?? []).map((character) => {
+    const voice = state.voices[character.name];
+    const hasDesigned = Boolean(designedVoiceOf(state, character.name));
+    if (!voice) return { name: character.name, gender: character.gender, voiceDescription: character.voiceDescription, samplePath: narrator?.samplePath, source: 'narrator', narratorId: narrator?.narratorId, narratorName: narrator?.label ?? 'your narrator', hasDesigned };
+    return { name: character.name, gender: character.gender, voiceDescription: character.voiceDescription, samplePath: voice.samplePath, source: voice.source ?? (character.name === 'Narrator' ? 'narrator' : 'designed'), narratorId: voice.narratorId, narratorName: voice.label, hasDesigned };
+  });
+}
+
+function publishJob(state: JobState, patch: Partial<BookJob> = {}) {
+  const previous = bookJobs.get(state.jobId);
+  bookJobs.set(state.jobId, {
+    stage: previous?.stage ?? 'Queued',
+    result: previous?.result,
+    status: state.status,
+    userId: state.userId,
+    account: state.signedIn,
+    updatedAt: new Date().toISOString(),
+    chapters: state.chapters.map(({ index, title, status, audioKey, durationMs, error }) => ({ index, title, status, audioKey, durationMs, error })),
+    awaitingCast: awaitingCast(state),
+    cast: state.castReady ? castOf(state) : undefined,
+    error: state.error,
+    ...patch,
+  });
+}
+
+// Adjacent lines by the same speaker with the same delivery are read in one go, up to this many characters: fewer
+// generations, and the model carries the voice's rhythm across sentences instead of restarting at each one.
+const MERGE_MAX_CHARS = 500;
+
+function mergeSegments(segments: Segment[]): Segment[] {
+  const merged: Segment[] = [];
+  for (const segment of segments) {
+    const last = merged.at(-1);
+    const joinable = last && segment.kind !== 'heading' && last.kind === segment.kind && last.speaker === segment.speaker && last.delivery === segment.delivery
+      && last.text.length + segment.text.length + 1 <= MERGE_MAX_CHARS;
+    if (!joinable) {
+      merged.push({ ...segment, emotionVector: { ...segment.emotionVector } });
+      continue;
     }
-    app.log.info({ segmentCount: allSegments.length }, 'Segments extracted');
+    // The joined line takes the mean of its parts' emotions, weighted by length, and keeps the first label.
+    const total = last.text.length + segment.text.length;
+    for (const emotion of EMOTIONS) last.emotionVector[emotion] = Math.round(((last.emotionVector[emotion] * last.text.length + segment.emotionVector[emotion] * segment.text.length) / total) * 100) / 100;
+    last.text = `${last.text} ${segment.text}`;
+  }
+  return merged;
+}
 
-    setStage('Designing character voices');
-    app.log.info('Getting narrator reference');
-    const selectedReference = await selectedNarratorReference(userId);
-    const narratorReference = selectedReference ?? await latestNarratorReference();
-    app.log.info({ narratorReference, source: selectedReference ? 'selected narrator voice' : 'newest Voice Lab WAV (no narrator selected)' }, 'Narrator reference chosen');
-    const references = new Map<string, string>([['Narrator', narratorReference]]);
-    for (const [index, character] of roster.characters.filter((item) => item.name !== 'Narrator').entries()) {
+// The order lines are generated in: grouped by voice, in the order the voices first speak, and in text order within a
+// group. IndexTTS keeps the conditioning for the last reference it saw, so a run of lines in one voice skips the
+// cloning step that every change of voice costs.
+function generationOrder(speakers: string[]) {
+  const firstSeen = new Map<string, number>();
+  speakers.forEach((speaker, index) => { if (!firstSeen.has(speaker)) firstSeen.set(speaker, index); });
+  return speakers.map((speaker, index) => index).sort((a, b) => firstSeen.get(speakers[a])! - firstSeen.get(speakers[b])! || a - b);
+}
+
+async function splitSegments(roster: Roster, text: string) {
+  const chunks = chunkText(text, SEGMENT_CHUNK_CHARS);
+  const parsed = await mapWithConcurrency(chunks, SEGMENT_CONCURRENCY, (chunk) => claudeStructuredOutput(
+    'split_segments',
+    'Split the provided book chunk into ordered narration, dialogue and heading segments. Use only roster names, preserve text verbatim, and score the emotion that should guide delivery.',
+    `Use this roster consistently:\n${JSON.stringify(roster.characters.map(({ name, aliases }) => ({ name, aliases })))}\n\nSplit this chunk into ordered segments. Do not summarize or rewrite the text. Narration and speech tags ("she said") use the Narrator speaker. A chapter or section title (for example "Chapter 3: The Storm" or "Epilogue") is its own segment with kind "heading", speaker Narrator, normal delivery and a calm emotion.\n\n${EMOTION_GUIDE}\n\nChunk:\n${chunk}`,
+    segmentsSchema,
+    'medium',
+  ));
+  return parsed.flatMap((result) => result.segments);
+}
+
+// The listener's selected narrator, or the newest Voice Lab voice when they haven't picked one.
+async function narratorVoiceRef(who: Requester): Promise<VoiceRef> {
+  const selected = await selectedNarrator(who);
+  if (selected) return studioVoiceRef(selected.voice);
+  const fallback = await latestNarratorReference();
+  return { referenceKey: fallback.key, samplePath: fallback.key, source: 'narrator', label: 'Voice Lab sample' };
+}
+
+const studioVoiceRef = (voice: NarratorVoice): VoiceRef => ({ voiceId: voice.id, referenceKey: voice.referenceKey, samplePath: voice.previewKey, source: 'narrator', narratorId: voice.id, label: voice.name });
+
+/** Creates a book from an upload or a catalog import and starts narrating it. The job id is also the book's id. */
+function startBook(input: { who: Requester; fileName: string; buffer: Buffer; book: ExtractedBook; characterVoices: boolean; title?: string; author?: string }) {
+  const jobId = randomUUID();
+  const multi = input.book.chapters.length > 1;
+  const title = input.title ?? path.basename(input.fileName, path.extname(input.fileName)).replace(/[_-]+/g, ' ').trim();
+  let offset = 0;
+  const chapters = input.book.chapters.map((chapter, index) => {
+    const startOffset = offset;
+    offset += chapter.text.length + 2;
+    return { index, title: chapter.title ?? (multi ? `Chapter ${index + 1}` : title), text: chapter.text, startOffset, status: 'queued' as const };
+  });
+  const state: JobState = {
+    jobId, userId: input.who.id, testId: input.who.testId, signedIn: input.who.signedIn, server: SERVER_NAME,
+    sourceKey: `${bookFolder(jobId)}/source${path.extname(input.fileName).toLowerCase() || '.txt'}`,
+    title, author: input.author, characterVoices: input.characterVoices, status: 'processing', chapters, voices: {}, segments: {}, narrated: {},
+    // With one voice there's nothing to review.
+    reviewCast: input.characterVoices,
+  };
+  publishJob(state, { stage: 'Queued' });
+  void runBook(state, input.buffer);
+  return jobId;
+}
+
+// Narrates every chapter that isn't ready yet, one at a time, so a reader can start on chapter 1 while the rest are
+// made. Each step is saved to the job state, so a retry, a restart or a new narrator picks up without redoing Claude's
+// work. With characterVoices off (the app's Character Voices switch), the narrator reads every line.
+async function runBook(state: JobState, sourceBuffer?: Buffer) {
+  const { jobId } = state;
+  if (running.has(jobId)) return;
+  running.set(jobId, state);
+  waitingBooks.delete(jobId);
+  let finishRun!: () => void;
+  runDone.set(jobId, new Promise<void>((resolve) => { finishRun = resolve; }));
+  const folder = bookFolder(jobId);
+  const who: Requester = { id: state.userId, testId: state.testId, signedIn: state.signedIn };
+  const multi = state.chapters.length > 1;
+  const setStage = (stage: string) => publishJob(state, { stage });
+  const lineAudioUser = (index: number) => `${jobId}:${index}`;
+  const checkCancelled = () => {
+    if (cancelled.has(jobId)) throw new Error('The book was removed.');
+    if (stopping.has(jobId)) throw new Error('Narration was stopped.');
+  };
+  const save = async () => {
+    if (!cancelled.has(jobId)) await putBytes(jobStateKey(jobId), JSON.stringify(state));
+  };
+  // Supabase rows are a record of what's in S3, so a failed write is logged and the audiobook still finishes.
+  let recordInSupabase = state.signedIn;
+  const record = async (what: string, write: () => Promise<unknown>) => {
+    if (!recordInSupabase) return;
+    await write().catch((error: unknown) => {
+      app.log.warn({ error: error instanceof Error ? error.message : error, jobId }, `Supabase ${what} not recorded`);
+      if (what === 'book') recordInSupabase = false;
+    });
+  };
+  // The marker's beatAt tells other servers sharing the bucket that this book is alive, even if Supabase writes fail.
+  const writeMarker = () => putBytes(`${activeMarkerFolder(jobId)}marker.json`, JSON.stringify({ server: SERVER_NAME, beatAt: new Date().toISOString() }));
+  const heartbeat = setInterval(() => {
+    void record('heartbeat', () => touchBook(jobId));
+    if (!cancelled.has(jobId)) void writeMarker().catch(() => {});
+  }, HEARTBEAT_MS);
+  const references = new Map<string, string>();
+  try {
+    state.status = 'processing';
+    state.error = undefined;
+    state.server = SERVER_NAME;
+    if (sourceBuffer) {
+      await putBytes(state.sourceKey, sourceBuffer);
+      await record('book', () => setBookSource({ id: jobId, userId: state.userId, title: state.title, author: state.author, sourcePath: state.sourceKey, sizeBytes: sourceBuffer.length }));
+    } else {
+      await record('book', () => setBookProcessing(jobId));
+    }
+    await writeMarker();
+    await save();
+    app.log.info({ jobId, chapterCount: state.chapters.length, titles: state.chapters.map((chapter) => chapter.title) }, 'Chapters found');
+
+    if (!state.roster) {
+      setStage('Reading the book with Claude');
+      app.log.info('Calling Claude to extract roster');
+      const excerpt = state.chapters.map((chapter) => chapter.text).join('\n\n').slice(0, ROSTER_EXCERPT_CHARS);
+      state.roster = await claudeStructuredOutput(
+        'extract_roster',
+        'Extract a stable character roster from the book excerpt. Always include Narrator. Voice descriptions must be safe, generic audio descriptions of adult voices.',
+        `Build a character roster for this book text. For each speaking character include the canonical name, aliases, gender (female, male, or neutral, inferred from names, pronouns, and context), and a voiceDescription of their permanent vocal traits. State the gender explicitly in every voiceDescription. Include Narrator.\n\n${VOICE_SAFETY_RULES}\n\nBook text:\n${excerpt}`,
+        rosterSchema,
+        'low',
+      );
+      app.log.info({ characterCount: state.roster.characters.length }, 'Roster extracted');
+      await save();
+    }
+    const roster = state.roster;
+    const castFor = (characters: RosterCharacter[]) => characters.map((character) => ({ ...character, voiceId: state.voices[character.name]?.voiceId, voiceSamplePath: state.voices[character.name]?.samplePath }));
+
+    const designVoice = async (character: RosterCharacter, index: number) => {
       app.log.info({ character: character.name }, 'Generating voice preview');
       try {
         const { voice, description } = await createCharacterVoice(character, index);
         character.voiceDescription = description;
-        const referencePath = path.join(TMP_ROOT, `char-${voice.id!.replace(/[^a-zA-Z0-9_-]/g, '_')}.wav`);
-        await writeFile(referencePath, Buffer.from(voice.sample_audio!.data!, 'base64'));
-        jobFiles.get(jobId)!.add(referencePath);
-        references.set(character.name, referencePath);
+        const fileBase = voice.id!.replace(/[^a-zA-Z0-9_-]/g, '_');
+        const key = `${folder}/voices/${fileBase}.wav`;
+        // Stored, and kept as the local copy IndexTTS reads; it's removed with the book's other copies when it ends.
+        references.set(character.name, await putBytesKeepingLocal(key, Buffer.from(voice.sample_audio!.data!, 'base64')));
+        state.voices[character.name] = { voiceId: voice.id, referenceKey: key, samplePath: key, source: 'designed' };
+        (state.designedVoices ??= {})[character.name] = state.voices[character.name];
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         app.log.warn({ character: character.name, error: message }, 'Voice generation blocked after all fallbacks, using narrator voice');
       }
-    }
-    app.log.info({ referenceCount: references.size }, 'Voice references generated');
-    app.log.info({ jobId, segmentCount: allSegments.length }, 'Starting IndexTTS generation');
-    const outputSegments = [];
-    let adjustedVectors = 0;
-    for (const [index, segment] of allSegments.entries()) {
-      setStage(`Narrating (${index + 1}/${allSegments.length})`);
-      const speaker = references.has(segment.speaker) ? segment.speaker : 'Narrator';
-      // Dialogue from characters without their own voice falls back to the narrator voice but keeps its emotion.
-      const isNarration = segment.speaker === 'Narrator' || segment.kind === 'narration';
-      const { capped, changed } = isNarration ? capNarratorEmotion(segment.emotionVector) : shapeDialogueEmotion(segment.emotionVector);
-      const delivery = isNarration ? 'normal' : segment.delivery;
-      if (changed) adjustedVectors += 1;
-      const emotionVector = EMOTIONS.map((emotion) => capped[emotion]);
-      const speechText = segment.kind === 'dialogue' ? dialogueSpeechText(segment.text) : segment.text;
-      const outputPath = await runIndexTts(references.get(speaker)!, speechText, segment.emotion, emotionVector);
-      jobFiles.get(jobId)!.add(outputPath);
-      outputSegments.push({
-        index, speaker, kind: segment.kind, text: segment.text, emotion: segment.emotion, emotionVector: capped, delivery,
-        ...(speechText !== segment.text ? { speechText } : {}),
-        ...(changed ? { requestedEmotionVector: segment.emotionVector } : {}),
-        outputPath,
-      });
-    }
-    app.log.info({ adjustedVectors }, 'Segments with emotion vector capped or reshaped');
-    app.log.info({ generatedCount: outputSegments.length }, 'IndexTTS generation complete');
+    };
 
-    const manifestPath = path.join(TMP_ROOT, `${jobId}.json`);
-    const wavPath = path.join(TMP_ROOT, `${jobId}.wav`);
-    const mp3Path = path.join(TMP_ROOT, `${jobId}.mp3`);
-    setStage('Mixing the final audio');
-    app.log.info('Stitching segments');
-    const compiled = await stitchSegments(jobId, outputSegments.map((segment) => ({ path: segment.outputPath, gainOffsetDb: DELIVERY_GAIN_DB[segment.delivery] })));
-    await writeFile(manifestPath, JSON.stringify({ jobId, roster, segments: outputSegments, compiled }, null, 2));
-    jobFiles.get(jobId)!.add(manifestPath);
-    jobFiles.get(jobId)!.add(wavPath);
-    jobFiles.get(jobId)!.add(mp3Path);
-    app.log.info({ jobId }, 'Book processing complete');
-    const result = { jobId, roster, segments: outputSegments, compiled, manifestPath };
-    bookJobs.set(jobId, { status: 'done', stage: 'Complete', userId, updatedAt: new Date().toISOString(), result });
+    // Characters the opening didn't reach are found chapter by chapter, given voices, and added to the cast.
+    const extendRoster = async (chapter: ChapterState) => {
+      if (chapter.startOffset + chapter.text.length <= ROSTER_EXCERPT_CHARS) return;
+      const found = await claudeStructuredOutput(
+        'extend_roster',
+        'Find speaking characters in a book chapter who are missing from an existing roster. Voice descriptions must be safe, generic audio descriptions of adult voices.',
+        `Existing roster:\n${JSON.stringify(roster.characters.map(({ name, aliases }) => ({ name, aliases })))}\n\nList only characters who speak in this chapter and are not in the existing roster (check names and aliases). For each include the canonical name, aliases, gender (female, male, or neutral), and a voiceDescription of their permanent vocal traits that states the gender. Return an empty list if there are none.\n\n${VOICE_SAFETY_RULES}\n\nChapter:\n${chapter.text.slice(0, ROSTER_EXCERPT_CHARS)}`,
+        newCharactersSchema,
+        'low',
+      );
+      const known = new Set(roster.characters.flatMap((character) => [character.name, ...character.aliases].map((name) => name.toLowerCase())));
+      const added = found.characters.filter((character) => character.name !== 'Narrator' && !known.has(character.name.toLowerCase()));
+      if (!added.length) return;
+      roster.characters.push(...added);
+      if (state.characterVoices) for (const character of added) await designVoice(character, roster.characters.length);
+      app.log.info({ jobId, chapter: chapter.index, added: added.map((character) => character.name) }, 'New characters added to the cast');
+      await record('cast additions', () => setBookCast(jobId, castFor(added)));
+      await save();
+    };
+
+    // Segmenting runs a chapter ahead of narration: Claude is a network call and IndexTTS runs locally, so the two
+    // overlap. Splits are saved, so a retry or a new narrator reuses them.
+    const segmentations = new Map<number, Promise<Segment[]>>();
+    const segmentsFor = (index: number) => {
+      if (!segmentations.has(index)) {
+        const cached = state.segments[index];
+        const split = cached ? Promise.resolve(cached) : (async () => {
+          await extendRoster(state.chapters[index]);
+          const segments = await splitSegments(roster, state.chapters[index].text);
+          state.segments[index] = segments;
+          await save();
+          return segments;
+        })();
+        split.catch(() => {}); // Awaited (and reported) when its chapter comes up.
+        segmentations.set(index, split);
+      }
+      return segmentations.get(index)!;
+    };
+    const pending = state.chapters.filter((chapter) => chapter.status !== 'ready');
+    if (pending[0] && state.chapters[pending[0].index].startOffset < ROSTER_EXCERPT_CHARS) segmentsFor(pending[0].index);
+
+    if (!state.castReady) {
+      setStage(state.characterVoices ? 'Designing character voices' : 'Preparing the narrator');
+      state.voices.Narrator = await narratorVoiceRef(who);
+      app.log.info({ narrator: state.voices.Narrator.referenceKey }, 'Narrator reference chosen');
+      if (state.characterVoices) {
+        for (const [index, character] of roster.characters.filter((item) => item.name !== 'Narrator').entries()) await designVoice(character, index);
+      } else {
+        app.log.info({ jobId }, 'Character voices off: the narrator reads every line');
+      }
+      if (!roster.characters.some((character) => character.name === 'Narrator')) {
+        roster.characters.unshift({ name: 'Narrator', aliases: [], gender: 'neutral', voiceDescription: 'The narrator.' });
+      }
+      await record('cast', () => setBookCast(jobId, castFor(roster.characters)));
+      await record('chapters', () => setBookChapters(jobId, state.chapters.map(({ index, title, text }) => ({ index, title, wordCount: wordCount(text) }))));
+      state.castReady = true;
+      await save();
+    }
+    // Local copies of every reference recording; after a restart they're downloaded again from storage.
+    for (const [name, voice] of Object.entries(state.voices)) {
+      if (references.has(name)) continue;
+      const local = await localCopy(voice.referenceKey);
+      if (local) references.set(name, local);
+    }
+    if (!references.has('Narrator')) throw new Error('The narrator voice recording could not be found.');
+
+    if (awaitingCast(state)) {
+      // The voices are ready to hear. Narration starts when the reader approves the cast (PUT /api/books/:id/cast).
+      // The book isn't "processing" meanwhile, so no server's stale sweep marks it failed, and it has no active
+      // marker, so a restart doesn't pick it up.
+      await save();
+      await record('book queued', () => setBookQueued(jobId));
+      await deletePrefix(activeMarkerFolder(jobId)).catch(() => {});
+      publishJob(state, { stage: 'Review the cast' });
+      waitingBooks.set(jobId, state);
+      app.log.info({ jobId, cast: castOf(state).map((entry) => `${entry.name}: ${entry.source}`) }, 'Waiting for the reader to approve the cast');
+      return;
+    }
+
+    // The manifest is rewritten after every chapter, so finished chapters are on record even if a later one fails.
+    const manifestKey = `${folder}/manifest.json`;
+    const writeManifest = () => putBytes(manifestKey, JSON.stringify({
+      jobId, userId: state.userId, sourceKey: state.sourceKey, characterVoices: state.characterVoices, roster,
+      cast: roster.characters.map(({ name }) => ({ name, voiceId: state.voices[name]?.voiceId, voiceSamplePath: state.voices[name]?.samplePath })),
+      chapters: state.chapters.filter((chapter) => state.narrated[chapter.index]).map((chapter) => ({ index: chapter.index, title: chapter.title, ...state.narrated[chapter.index] })),
+    }, null, 2));
+
+    for (const chapter of pending) {
+      const stage = (what: string) => setStage(multi ? `Chapter ${chapter.index + 1} of ${state.chapters.length} · ${what}` : what);
+      try {
+        checkCancelled();
+        chapter.status = 'processing';
+        chapter.error = undefined;
+        publishJob(state);
+        await record('chapter status', () => setChapterStatus(jobId, chapter.index, 'processing'));
+        stage('Splitting scenes');
+        const segments = await segmentsFor(chapter.index);
+        const upcoming = pending.find((item) => item.index > chapter.index);
+        if (upcoming) segmentsFor(upcoming.index);
+        app.log.info({ jobId, chapter: chapter.index, segmentCount: segments.length }, 'Starting IndexTTS generation');
+
+        const lines = mergeSegments(segments);
+        const speakers = lines.map((segment) => (references.has(segment.speaker) ? segment.speaker : 'Narrator'));
+        const outputSegments: Array<{ index: number; speaker: string; kind: Segment['kind']; text: string; emotion: string; emotionVector: Segment['emotionVector']; delivery: Segment['delivery']; speechText?: string; requestedEmotionVector?: Segment['emotionVector']; outputPath: string }> = [];
+        let adjustedVectors = 0;
+        let generated = 0;
+        for (const index of generationOrder(speakers)) {
+          const segment = lines[index];
+          checkCancelled();
+          stage(`Narrating (${++generated}/${lines.length})`);
+          const speaker = speakers[index];
+          // Dialogue from characters without their own voice falls back to the narrator voice but keeps its emotion.
+          const isNarration = segment.speaker === 'Narrator' || segment.kind !== 'dialogue';
+          const { capped, changed } = isNarration ? capNarratorEmotion(segment.emotionVector) : shapeDialogueEmotion(segment.emotionVector);
+          const delivery = isNarration ? 'normal' : segment.delivery;
+          if (changed) adjustedVectors += 1;
+          const cloned = isClonedVoice(state.voices[speaker]?.voiceId);
+          const shapedVector = EMOTIONS.map((emotion) => capped[emotion]);
+          const emotionVector = cloned ? cloneEmotion(shapedVector) : shapedVector;
+          const speechText = segment.kind === 'dialogue' ? dialogueSpeechText(segment.text) : segment.text;
+          const outputPath = await runIndexTts(references.get(speaker)!, speechText, segment.emotion, emotionVector, pacingFor(speechText, isNarration, cloned), lineAudioUser(chapter.index));
+          outputSegments[index] = {
+            index, speaker, kind: segment.kind, text: segment.text, emotion: segment.emotion, emotionVector: capped, delivery,
+            ...(speechText !== segment.text ? { speechText } : {}),
+            ...(changed ? { requestedEmotionVector: segment.emotionVector } : {}),
+            outputPath,
+          };
+        }
+        app.log.info({ chapter: chapter.index, adjustedVectors, generatedCount: outputSegments.length, mergedFrom: segments.length }, 'IndexTTS generation complete');
+
+        stage('Mixing the audio');
+        const { wavPath, mp3Path, startsSec } = await stitchSegments(`${jobId}-${chapter.index}`, outputSegments.map((segment) => ({
+          path: segment.outputPath,
+          gainOffsetDb: DELIVERY_GAIN_DB[segment.delivery],
+          pauseAfterSec: pauseAfter(segment.text, segment.kind),
+        })));
+        // Only the MP3 is kept; the WAV master is several times larger and nothing plays it.
+        checkCancelled();
+        stage('Saving the audio');
+        const audioKey = chapterAudioKey(jobId, chapter.index, state.chapters.length);
+        await putFile(audioKey, mp3Path);
+        // 16-bit mono PCM at SAMPLE_RATE, so the WAV's size gives the running time.
+        const durationMs = Math.round(((await stat(wavPath)).size - 44) / (SAMPLE_RATE * 2) * 1000);
+        const sizeBytes = (await stat(mp3Path)).size;
+        await rm(wavPath, { force: true });
+        await rm(mp3Path, { force: true });
+        await record('chapter', () => setChapterAudio(jobId, { index: chapter.index, title: chapter.title, audioPath: audioKey, durationMs, sizeBytes, wordCount: wordCount(chapter.text) }));
+        Object.assign(chapter, { status: 'ready', audioKey, durationMs });
+        // Who speaks when, so the player can show the current speaker.
+        state.narrated[chapter.index] = { audioKey, durationMs, timeline: outputSegments.map((segment, index) => ({ startSec: startsSec[index], speaker: segment.speaker })), segments: outputSegments };
+        timelineCache.delete(`${jobId}:${chapter.index}`);
+        await save();
+        await writeManifest();
+        publishJob(state);
+        // The chapter's MP3 is in storage, so its line audio is no longer needed here.
+        await releaseLineAudio(lineAudioUser(chapter.index), true);
+        app.log.info({ jobId, chapter: chapter.index, audioKey, durationMs }, 'Chapter ready');
+      } catch (error) {
+        if (cancelled.has(jobId) || stopping.has(jobId)) throw error;
+        // One chapter failing (a refusal, say) leaves the others listenable.
+        const message = error instanceof Error ? error.message : 'Chapter narration failed.';
+        app.log.error({ error, message, jobId, chapter: chapter.index }, 'Chapter failed');
+        Object.assign(chapter, { status: 'failed', error: message });
+        // Lines already made are kept for a retry, which reuses them instead of narrating them again.
+        await releaseLineAudio(lineAudioUser(chapter.index), false);
+        publishJob(state);
+        await record('chapter status', () => setChapterStatus(jobId, chapter.index, 'failed', message));
+        await save();
+      }
+    }
+    const ready = state.chapters.filter((chapter) => chapter.status === 'ready');
+    const failed = state.chapters.filter((chapter) => chapter.status === 'failed');
+    if (!ready.length) throw new Error(failed[0]?.error ?? 'No chapter could be narrated.');
+
+    const problem = failed.length ? `${failed.length} of ${state.chapters.length} chapters could not be narrated: ${failed.map((chapter) => `${chapter.title} (${chapter.error})`).join('; ')}` : undefined;
+    const durationMs = ready.reduce((total, chapter) => total + (chapter.durationMs ?? 0), 0);
+    await record('book status', () => setBookReady(jobId, { chapters: state.chapters.length, durationMs, problem, modelInfo: { roster: CLAUDE_MODEL, voices: GEMINI_MODEL, speech: 'IndexTTS2', characterVoices: state.characterVoices ? 'on' : 'off' } }));
+    state.status = 'done';
+    state.error = problem;
+    await save();
+    await deletePrefix(activeMarkerFolder(jobId)).catch(() => {});
+    app.log.info({ jobId, narrated: ready.length, failed: failed.length }, 'Book processing complete');
+    publishJob(state, { stage: 'Complete', result: { jobId, roster, chapters: bookJobs.get(jobId)?.chapters } });
   } catch (error) {
+    if (cancelled.has(jobId)) {
+      app.log.info({ jobId }, 'Narration stopped: the book was removed');
+      return;
+    }
+    if (stopping.has(jobId)) return; // Put back at the cast review in finally, once the run has let go.
     const message = error instanceof Error ? error.message : 'Book processing failed.';
     app.log.error({ error, message, jobId }, 'Book processing failed');
-    bookJobs.set(jobId, { status: 'error', stage: 'Failed', userId, updatedAt: new Date().toISOString(), error: message });
-    // Clean up files for failed job
-    for (const file of jobFiles.get(jobId) ?? []) await rm(file, { force: true }).catch(() => {});
-    jobFiles.delete(jobId);
+    for (const chapter of state.chapters) if (chapter.status === 'processing') Object.assign(chapter, { status: 'failed', error: message });
+    state.status = 'error';
+    state.error = message;
+    publishJob(state, { stage: 'Failed' });
+    await record('failure', () => setBookFailed(jobId, message));
+    // The source, voices and Claude's splits are kept, so the book can be retried without starting over.
+    await save().catch(() => {});
+    await deletePrefix(activeMarkerFolder(jobId)).catch(() => {});
+  } finally {
+    clearInterval(heartbeat);
+    running.delete(jobId);
+    const stopped = stopping.has(jobId) && !cancelled.has(jobId);
+    for (const chapter of state.chapters) await releaseLineAudio(lineAudioUser(chapter.index), cancelled.has(jobId) || stopped).catch(() => {});
+    // Local copies of the voices this book used, unless another book narrating here still reads them (a shared
+    // narrator). Everything is in storage, and a retry downloads what it needs again.
+    const stillUsed = new Set([...running.values()].flatMap((other) => Object.values(other.voices).map((voice) => voice.referenceKey)));
+    await dropLocalCopies([`${folder}/`, ...Object.values(state.voices).map((voice) => voice.referenceKey).filter((key) => !stillUsed.has(key))]).catch(() => {});
+    if (cancelled.has(jobId)) {
+      // Anything written after the removal (a chapter that was mid-upload) is cleared too.
+      await deletePrefix(`${folder}/`).catch(() => {});
+      await deletePrefix(activeMarkerFolder(jobId)).catch(() => {});
+      cancelled.delete(jobId);
+    }
+    stopping.delete(jobId);
+    // A book that finished in the moment Stop was pressed stays finished.
+    if (stopped && state.status !== 'done') await returnToCast(state).catch((error: unknown) => app.log.error({ error, jobId }, 'Could not put the stopped book back at its cast'));
+    runDone.delete(jobId);
+    finishRun();
   }
+}
+
+// After Stop: the narrated audio is deleted (chapter MP3s, the manifest, line audio), every chapter waits again, and
+// the book waits at its cast review. The source, the cast's voices and Claude's scene splits stay, so starting again
+// doesn't pay for them twice, and removing the book deletes everything.
+async function returnToCast(state: JobState) {
+  const { jobId } = state;
+  const folder = bookFolder(jobId);
+  await deletePrefix(`${folder}/chapters/`);
+  await deleteKeys([`${folder}/audio.mp3`, `${folder}/manifest.json`]);
+  await deletePrefix(activeMarkerFolder(jobId)).catch(() => {});
+  for (const chapter of state.chapters) {
+    Object.assign(chapter, { status: 'queued', audioKey: undefined, durationMs: undefined, error: undefined });
+    timelineCache.delete(`${jobId}:${chapter.index}`);
+  }
+  Object.assign(state, { narrated: {}, status: 'processing', error: undefined, reviewCast: true, castApproved: false });
+  await putBytes(jobStateKey(jobId), JSON.stringify(state));
+  if (state.signedIn) {
+    await setBookQueued(jobId).catch((error: unknown) => app.log.warn({ error, jobId }, 'Stopped book not marked queued in Supabase'));
+    await resetChapterAudio(jobId).catch((error: unknown) => app.log.warn({ error, jobId }, 'Stopped book chapters not reset in Supabase'));
+  }
+  publishJob(state, { stage: 'Review the cast', result: undefined });
+  waitingBooks.set(jobId, state);
+  app.log.info({ jobId }, 'Narration stopped: back at the cast review');
+}
+
+function readCharacterVoices(fields: Record<string, unknown> | undefined) {
+  const field = fields?.characterVoices as { value?: unknown } | Array<unknown> | undefined;
+  return (field && !Array.isArray(field) && 'value' in field ? String(field.value) : 'true') !== 'false';
 }
 
 app.post('/api/books/process', async (request, reply) => {
@@ -724,15 +1415,14 @@ app.post('/api/books/process', async (request, reply) => {
     const upload = await request.file();
     if (!upload) return reply.code(400).send({ error: 'Attach a book file in the book field.' });
     app.log.info({ filename: upload.filename }, 'File received');
-    const bookText = await extractBookText(upload.filename, await upload.toBuffer());
-    const wordCount = bookText.split(/\s+/).filter(word => word.length > 0).length;
-    app.log.info({ textLength: bookText.length, wordCount }, 'Text extracted from file');
-    if (wordCount < 10) return reply.code(400).send({ error: 'The uploaded file did not contain enough readable text (minimum 10 words).' });
-
-    const jobId = randomUUID();
-    const userId = narratorUserId(request);
-    bookJobs.set(jobId, { status: 'processing', stage: 'Queued', userId, updatedAt: new Date().toISOString() });
-    void processBook(jobId, bookText, userId);
+    const buffer = await upload.toBuffer();
+    const book = await extractBook(upload.filename, buffer);
+    const words = wordCount(book.text);
+    app.log.info({ textLength: book.text.length, wordCount: words, chapterCount: book.chapters.length }, 'Text extracted from file');
+    if (words < 10) return reply.code(400).send({ error: 'The uploaded file did not contain enough readable text (minimum 10 words).' });
+    // Sent as a form field ahead of the file; anything but "false" keeps character voices on.
+    const characterVoices = readCharacterVoices(upload.fields);
+    const jobId = startBook({ who: await requester(request), fileName: upload.filename, buffer, book, characterVoices });
     return reply.code(202).send({ jobId, status: 'processing', stage: 'Queued' });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Book processing failed.';
@@ -741,17 +1431,240 @@ app.post('/api/books/process', async (request, reply) => {
   }
 });
 
-app.get('/api/books/jobs/:jobId', async (request, reply) => {
-  const { jobId } = request.params as { jobId: string };
-  const job = bookJobs.get(jobId);
-  if (!job || job.userId !== narratorUserId(request)) return reply.code(404).send({ error: 'Book job not found.' });
-  return { jobId, status: job.status, stage: job.stage, updatedAt: job.updatedAt, result: job.result, error: job.error };
+// Narrates a public-domain book from Project Gutenberg, the same way as an uploaded TXT file.
+app.post('/api/books/import', async (request, reply) => {
+  try {
+    ensureClaudeConfiguration();
+    ensureConfiguration();
+    const input = z.object({
+      gutenbergId: z.number().int().positive(),
+      title: z.string().trim().min(1).max(300),
+      author: z.string().trim().max(300).optional(),
+      characterVoices: z.boolean().default(true),
+    }).parse(request.body);
+    const book = await gutenbergBook(input.gutenbergId);
+    if (wordCount(book.text) < 10) return reply.code(400).send({ error: 'That book had no readable text.' });
+    app.log.info({ gutenbergId: input.gutenbergId, chapterCount: book.chapters.length, wordCount: wordCount(book.text) }, 'Catalog book downloaded');
+    const jobId = startBook({ who: await requester(request), fileName: `gutenberg-${input.gutenbergId}.txt`, buffer: book.buffer, book, characterVoices: input.characterVoices, title: input.title, author: input.author });
+    return reply.code(202).send({ jobId, status: 'processing', stage: 'Queued', chapterCount: book.chapters.length });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Could not import that book.';
+    app.log.error({ error, message }, 'Catalog import failed');
+    return reply.code(400).send({ error: message });
+  }
 });
 
-app.get('/api/narrators', async (request) => narratorState(narratorUserId(request)));
+// A book's job state, if the requester made the book. Books made before job state existed have none.
+async function ownedJob(jobId: string, who: Requester) {
+  if (!isBookId(jobId)) return undefined;
+  const state = waitingBooks.get(jobId) ?? await loadJob(jobId);
+  return state && isOwner({ userId: state.userId, account: state.signedIn }, who) ? state : undefined;
+}
+
+app.get('/api/books/jobs/:jobId', async (request, reply) => {
+  const { jobId } = request.params as { jobId: string };
+  const who = await requester(request);
+  let job = bookJobs.get(jobId);
+  // After a restart the job isn't in memory; its saved state still answers.
+  if (!job) {
+    const state = await ownedJob(jobId, who);
+    if (state) {
+      publishJob(state, { stage: state.status === 'done' ? 'Complete' : state.status === 'error' ? 'Failed' : awaitingCast(state) ? 'Review the cast' : 'Waiting to resume' });
+      job = bookJobs.get(jobId);
+    }
+  }
+  if (!job || !isOwner({ userId: job.userId, account: job.account }, who)) return reply.code(404).send({ error: 'Book job not found.' });
+  return { jobId, status: job.status, stage: job.stage, updatedAt: job.updatedAt, chapters: job.chapters, awaitingCast: job.awaitingCast, cast: job.cast, result: job.result, error: job.error };
+});
+
+// The cast and the voice each member is read with.
+app.get('/api/books/:jobId/cast', async (request, reply) => {
+  const { jobId } = request.params as { jobId: string };
+  const state = await ownedJob(jobId, await requester(request));
+  if (!state) return reply.code(404).send({ error: 'Book not found.' });
+  return { cast: state.castReady ? castOf(state) : [], awaitingCast: awaitingCast(state), characterVoices: state.characterVoices, narrating: running.has(jobId) };
+});
+
+// Changes who reads which part. Each entry gives a character one of the reader's studio voices, or (designed: true)
+// the voice Gemini made for them. On a book waiting for approval, `start` begins narration with the cast as it stands.
+// On a narrated book, every chapter the changed voices speak in is narrated again.
+const castChangeSchema = z.object({
+  voices: z.record(z.string().min(1), z.union([z.object({ narratorId: z.string().min(1) }), z.object({ designed: z.literal(true) })])).default({}),
+  start: z.boolean().default(false),
+});
+
+app.put('/api/books/:jobId/cast', async (request, reply) => {
+  const { jobId } = request.params as { jobId: string };
+  const who = await requester(request);
+  const state = await ownedJob(jobId, who);
+  if (!state) return reply.code(404).send({ error: 'Book not found.' });
+  if (running.has(jobId)) return reply.code(409).send({ error: 'This book is being narrated. Wait for it to finish, then change its voices.' });
+  if (!state.castReady) return reply.code(409).send({ error: 'The cast isn\u2019t ready yet.' });
+  const input = castChangeSchema.parse(request.body);
+  const { voices: studio } = await myVoices(who);
+  const changed = new Set<string>();
+  for (const [name, choice] of Object.entries(input.voices)) {
+    if (!state.roster?.characters.some((character) => character.name === name)) return reply.code(400).send({ error: `${name} isn\u2019t in this book\u2019s cast.` });
+    let next: VoiceRef | undefined;
+    if ('narratorId' in choice) {
+      const voice = studio.find((item) => item.id === choice.narratorId);
+      if (!voice) return reply.code(404).send({ error: 'That voice isn\u2019t in your studio.' });
+      next = studioVoiceRef(voice);
+    } else {
+      if (name === 'Narrator') return reply.code(400).send({ error: 'The narrator needs one of your studio voices.' });
+      next = designedVoiceOf(state, name);
+    }
+    const current = state.voices[name];
+    // Swapping an old book's character away from its designed voice is the moment to remember that voice.
+    if (current && !current.source && name !== 'Narrator') (state.designedVoices ??= {})[name] = { ...current, source: 'designed' };
+    if ((current?.referenceKey ?? '') === (next?.referenceKey ?? '')) continue;
+    if (next) state.voices[name] = next;
+    else delete state.voices[name];
+    changed.add(name);
+    if (state.signedIn) {
+      const record = name === 'Narrator'
+        ? setNarratorSample(jobId, { voiceId: next!.voiceId, path: next!.samplePath })
+        : setCharacterVoice(jobId, name, next ? { voiceId: next.voiceId, samplePath: next.samplePath, voiceName: next.label } : { voiceId: state.voices.Narrator?.voiceId, samplePath: state.voices.Narrator?.samplePath, voiceName: state.voices.Narrator?.label });
+      await record.catch((error: unknown) => app.log.warn({ error, jobId, name }, 'Voice change not recorded in Supabase'));
+    }
+  }
+  const waiting = awaitingCast(state);
+  if (!waiting && changed.size) {
+    // Chapters the changed voices speak in go back in the queue. A new narrator touches every chapter: narration,
+    // and any character who has no voice of their own.
+    const everything = changed.has('Narrator');
+    for (const chapter of state.chapters) {
+      const spoken = state.segments[chapter.index]?.some((segment) => changed.has(segment.speaker)) ?? true;
+      if (!everything && !spoken) continue;
+      Object.assign(chapter, { status: 'queued', audioKey: undefined, durationMs: undefined, error: undefined });
+      delete state.narrated[chapter.index];
+      if (state.signedIn) await setChapterStatus(jobId, chapter.index, 'queued').catch(() => {});
+    }
+  }
+  if (waiting && input.start) state.castApproved = true;
+  await putBytes(jobStateKey(jobId), JSON.stringify(state));
+  app.log.info({ jobId, changed: [...changed], start: input.start }, waiting ? 'Cast reviewed' : 'Cast changed');
+  const startNow = (waiting && input.start) || (!waiting && changed.size > 0);
+  if (startNow) {
+    publishJob(state, { stage: 'Queued', result: undefined });
+    void runBook(state);
+  } else {
+    publishJob(state, { stage: waiting ? 'Review the cast' : state.status === 'done' ? 'Complete' : 'Failed' });
+  }
+  return { cast: castOf(state), awaitingCast: awaitingCast(state), narrating: startNow, changed: [...changed] };
+});
+
+// Retries every chapter that failed or never ran, reusing the cast, voices and Claude's splits.
+app.post('/api/books/:jobId/retry', async (request, reply) => {
+  const { jobId } = request.params as { jobId: string };
+  const who = await requester(request);
+  const state = await ownedJob(jobId, who);
+  if (!state) return reply.code(isBookId(jobId) && (await bookOwnerOf(jobId)) ? 409 : 404).send({ error: 'This book was made before retrying was possible, or it isn’t yours.' });
+  if (running.has(jobId)) return reply.code(409).send({ error: 'This book is already being narrated.' });
+  const retried = state.chapters.filter((chapter) => chapter.status !== 'ready');
+  if (!retried.length && state.castReady) return reply.code(409).send({ error: 'Every chapter is already narrated.' });
+  // A retry from a book still waiting on its cast means "go ahead with these voices".
+  if (awaitingCast(state)) state.castApproved = true;
+  for (const chapter of retried) {
+    Object.assign(chapter, { status: 'queued', error: undefined });
+    if (state.signedIn) await setChapterStatus(jobId, chapter.index, 'queued').catch(() => {});
+  }
+  publishJob(state, { stage: 'Queued', result: undefined });
+  void runBook(state);
+  return reply.code(202).send({ jobId, status: 'processing', retried: retried.length });
+});
+
+// Narrates the whole book again with the listener's currently selected narrator. Character voices are kept.
+app.post('/api/books/:jobId/renarrate', async (request, reply) => {
+  const { jobId } = request.params as { jobId: string };
+  const who = await requester(request);
+  const state = await ownedJob(jobId, who);
+  if (!state) return reply.code(isBookId(jobId) && (await bookOwnerOf(jobId)) ? 409 : 404).send({ error: 'This book was made before re-narrating was possible, or it isn’t yours.' });
+  if (running.has(jobId)) return reply.code(409).send({ error: 'This book is already being narrated.' });
+  if (!state.castReady) return reply.code(409).send({ error: 'This book hasn’t finished its first narration yet. Retry it instead.' });
+  try {
+    state.voices.Narrator = await narratorVoiceRef(who);
+  } catch (error) {
+    return reply.code(400).send({ error: error instanceof Error ? error.message : 'No narrator voice is available.' });
+  }
+  for (const chapter of state.chapters) Object.assign(chapter, { status: 'queued', audioKey: undefined, durationMs: undefined, error: undefined });
+  state.narrated = {};
+  if (state.signedIn) {
+    await setNarratorSample(jobId, { voiceId: state.voices.Narrator.voiceId, path: state.voices.Narrator.samplePath }).catch(() => {});
+    await setBookChapters(jobId, state.chapters.map(({ index, title, text }) => ({ index, title, wordCount: wordCount(text) }))).catch(() => {});
+  }
+  publishJob(state, { stage: 'Queued', result: undefined });
+  void runBook(state);
+  return reply.code(202).send({ jobId, status: 'processing' });
+});
+
+// Stops narration and takes the book back to its cast review (see returnToCast). Answers once narration has halted,
+// which is at the end of the line being read. A book still reading or designing voices just waits at the cast instead
+// of starting to narrate on its own.
+app.post('/api/books/:jobId/stop', async (request, reply) => {
+  const { jobId } = request.params as { jobId: string };
+  const who = await requester(request);
+  const live = running.get(jobId);
+  if (!live) {
+    const saved = await ownedJob(jobId, who);
+    if (!saved) return reply.code(404).send({ error: 'Book not found.' });
+    if (awaitingCast(saved)) return { stopped: true, awaitingCast: true, cast: castOf(saved) };
+    return reply.code(409).send({ error: 'This book isn\u2019t being narrated.' });
+  }
+  if (!isOwner({ userId: live.userId, account: live.signedIn }, who)) return reply.code(404).send({ error: 'Book not found.' });
+  live.reviewCast = true;
+  live.castApproved = false;
+  if (!live.castReady) {
+    app.log.info({ jobId }, 'Stop pressed before the cast was ready: the book will wait at its cast review');
+    return reply.code(202).send({ stopped: false, awaitingCast: false, cast: [] });
+  }
+  stopping.add(jobId);
+  app.log.info({ jobId }, 'Stopping narration');
+  await Promise.race([runDone.get(jobId), new Promise((resolve) => setTimeout(resolve, 120_000))]);
+  const state = waitingBooks.get(jobId) ?? live;
+  return { stopped: !running.has(jobId), awaitingCast: awaitingCast(state), cast: castOf(state) };
+});
+
+// Removes a book: its stored files, its job state, and (soft-deleted) its Supabase row. Narration in progress stops.
+app.delete('/api/books/:jobId', async (request, reply) => {
+  const { jobId } = request.params as { jobId: string };
+  const who = await requester(request);
+  const owner = isBookId(jobId) ? await bookOwnerOf(jobId) : undefined;
+  if (!owner || !isOwner(owner, who)) return reply.code(404).send({ error: 'Book not found.' });
+  if (running.has(jobId)) cancelled.add(jobId);
+  await deletePrefix(`${bookFolder(jobId)}/`);
+  await deletePrefix(activeMarkerFolder(jobId)).catch(() => {});
+  if (!running.has(jobId)) await dropLocalCopies([`${bookFolder(jobId)}/`]).catch(() => {});
+  await setBookDeleted(jobId).catch((error: unknown) => app.log.warn({ error, jobId }, 'Could not mark the book deleted in Supabase'));
+  bookJobs.delete(jobId);
+  waitingBooks.delete(jobId);
+  ownerCache.delete(jobId);
+  app.log.info({ jobId }, 'Book removed');
+  return { jobId, removed: true };
+});
+
+const timelineCache = new Map<string, TimelineEntry[]>();
+
+// Who speaks when in a chapter's audio, for the player's "is speaking" line.
+app.get('/api/books/:jobId/chapters/:index/timeline', async (request, reply) => {
+  const { jobId, index } = request.params as { jobId: string; index: string };
+  if (!isBookId(jobId) || !/^\d+$/.test(index)) return reply.code(404).send({ error: 'Not found.' });
+  if (!(await canReadBook(request, jobId))) return reply.code(403).send({ error: 'This book isn’t yours.' });
+  const cacheKey = `${jobId}:${index}`;
+  if (!timelineCache.has(cacheKey)) timelineCache.set(cacheKey, (await loadJob(jobId))?.narrated[index]?.timeline ?? []);
+  return { timeline: timelineCache.get(cacheKey) };
+});
+
+app.get('/api/narrators', async (request, reply) => {
+  const who = await requester(request);
+  if (needsAccount(who, reply)) return reply;
+  return narratorState(who);
+});
 
 app.post('/api/narrators', async (request, reply) => {
-  const userId = narratorUserId(request);
+  const who = await requester(request);
+  if (needsAccount(who, reply)) return reply;
+  const userId = who.id;
   try {
     ensureConfiguration();
     const input = narratorRequestSchema.parse(request.body);
@@ -759,16 +1672,16 @@ app.post('/api/narrators', async (request, reply) => {
       return reply.code(400).send({ error: 'Narrator voices must be adults. Describe the sound instead (e.g. "light, bright, high-pitched young adult voice") without words like child, kid, boy, girl, or teen.' });
     }
     const inFlight = narratorCreationsInFlight.get(userId) ?? 0;
-    const { remainingToday } = narratorQuota(await readNarratorStore(), userId);
+    const { remainingToday } = narratorQuota((await myVoices(who)).voices);
     if (remainingToday - inFlight <= 0) {
-      return reply.code(429).send({ error: `You can create ${NARRATOR_DAILY_LIMIT} narrator voices per day. Try again tomorrow.`, ...await narratorState(userId) });
+      return reply.code(429).send({ error: `You can create ${NARRATOR_DAILY_LIMIT} narrator voices per day. Try again tomorrow.`, ...await narratorState(who) });
     }
     narratorCreationsInFlight.set(userId, inFlight + 1);
     try {
       app.log.info({ userId }, 'Creating narrator voice');
-      const narrator = await createNarratorVoice(userId, input);
+      const narrator = await createNarratorVoice(who, input);
       app.log.info({ userId, voiceId: narrator.id }, 'Narrator voice created');
-      return { voice: publicNarrator(narrator), ...await narratorState(userId) };
+      return { voice: publicNarrator(narrator), ...await narratorState(who) };
     } finally {
       narratorCreationsInFlight.set(userId, (narratorCreationsInFlight.get(userId) ?? 1) - 1);
     }
@@ -779,16 +1692,60 @@ app.post('/api/narrators', async (request, reply) => {
   }
 });
 
+// A recording of a voice to clone. Fields come before the file: name, and consent ("true": the reader made the recording
+// or has the speaker's permission), then the audio under `audio`.
+app.post('/api/narrators/upload', async (request, reply) => {
+  const who = await requester(request);
+  if (needsAccount(who, reply)) return reply;
+  try {
+    const upload = await request.file({ limits: { fileSize: UPLOAD_MAX_BYTES } });
+    if (!upload) return reply.code(400).send({ error: 'Attach a recording in the audio field.' });
+    const field = (name: string) => {
+      const value = upload.fields[name] as { value?: unknown } | undefined;
+      return value && 'value' in value ? String(value.value) : '';
+    };
+    const name = field('name').trim().slice(0, 40) || 'My voice';
+    if (field('consent') !== 'true') return reply.code(400).send({ error: 'Confirm that this is your own recording, or that the speaker agreed to it being cloned.' });
+    const { uploadsRemainingToday } = narratorQuota((await myVoices(who)).voices);
+    if (uploadsRemainingToday <= 0) return reply.code(429).send({ error: `You can upload ${UPLOAD_DAILY_LIMIT} recordings a day. Try again tomorrow.`, ...await narratorState(who) });
+    const buffer = await upload.toBuffer();
+    if (upload.file.truncated) return reply.code(400).send({ error: `Recordings can be up to ${UPLOAD_MAX_BYTES / 1024 / 1024} MB.` });
+    app.log.info({ userId: who.id, fileName: upload.filename, bytes: buffer.length }, 'Cloning an uploaded voice');
+    const narrator = await createUploadedVoice(who, { name, fileName: upload.filename, buffer });
+    return { voice: publicNarrator(narrator), ...await narratorState(who) };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'The recording could not be used.';
+    app.log.error({ error, userId: who.id }, 'Voice upload failed');
+    return reply.code(400).send({ error: message });
+  }
+});
+
+// Removes a voice that no book reads with. A book keeps pointing at its voices' recordings, so a voice in use stays.
+app.delete('/api/narrators/:voiceId', async (request, reply) => {
+  const { voiceId } = request.params as { voiceId: string };
+  const who = await requester(request);
+  if (needsAccount(who, reply)) return reply;
+  const voice = await findVoice(who, voiceId);
+  if (!voice) return reply.code(404).send({ error: 'Voice not found.' });
+  if (voice.previewPending) return reply.code(409).send({ error: 'This voice is still being prepared. Try again in a minute.' });
+  const books = (await voiceUsage(who, [voice])).get(voiceId) ?? [];
+  const narratingNow = [...running.values(), ...waitingBooks.values()].some((state) => Object.values(state.voices).some((ref) => ref.referenceKey === voice.referenceKey));
+  if (books.length || narratingNow) return reply.code(409).send({ error: `${voice.name} is used by ${books.length ? books.map((book) => book.title).join(', ') : 'a book being narrated'}. Give those parts another voice first.` });
+  await deleteNarratorVoice(voiceId);
+  // The clips sit together in the voice's folder (older voices were filed under the mock user's id, so it's taken
+  // from the row rather than rebuilt).
+  await deletePrefix(`${path.posix.dirname(voice.referenceKey)}/`).catch((error: unknown) => app.log.warn({ error, voiceId }, 'Voice files not removed'));
+  app.log.info({ voiceId, userId: who.id }, 'Voice removed');
+  return narratorState(who);
+});
+
 app.put('/api/narrators/selected', async (request, reply) => {
-  const userId = narratorUserId(request);
+  const who = await requester(request);
+  if (needsAccount(who, reply)) return reply;
   const { voiceId } = z.object({ voiceId: z.string().min(1) }).parse(request.body);
-  const found = await updateNarratorStore((store) => {
-    if (!store.voices.some((voice) => voice.userId === userId && voice.id === voiceId)) return false;
-    store.selected[userId] = voiceId;
-    return true;
-  });
-  if (!found) return reply.code(404).send({ error: 'Narrator voice not found.' });
-  return narratorState(userId);
+  if (!(await findVoice(who, voiceId))) return reply.code(404).send({ error: 'Narrator voice not found.' });
+  await setSelectedNarrator(who.id, voiceId);
+  return narratorState(who);
 });
 
 // iOS AVPlayer streams media with byte-range requests and can refuse files served without range support.
@@ -806,12 +1763,105 @@ async function sendAudioFile(request: { headers: Record<string, string | string[
     .send(createReadStream(filePath, { start, end }));
 }
 
-// Audio players can't send custom headers on every platform, so previews are looked up by voice id only.
+// Stored audio is played from a short-lived signed S3 link (S3 handles the range requests), or streamed from disk
+// when the server runs without a bucket. The stable server URL lets a player come back after a link expires.
+async function sendStoredAudio(request: { headers: Record<string, string | string[] | undefined> }, reply: FastifyReply, key: string) {
+  const source = await playbackSource(key);
+  if (!source) return reply.code(404).send({ error: 'Audio not found.' });
+  if ('url' in source) return reply.header('cache-control', 'no-store').redirect(source.url, 302);
+  return sendAudioFile(request, reply, source.filePath);
+}
+
+// A voice's preview, for its owner. The app plays previews through /api/media/url (players can't send the sign-in
+// headers on every platform); this route stays for tools that can.
 app.get('/api/narrators/:voiceId/audio', async (request, reply) => {
   const { voiceId } = request.params as { voiceId: string };
-  const voice = (await readNarratorStore()).voices.find((item) => item.id === voiceId);
+  const voice = await findVoice(await requester(request), voiceId);
   if (!voice) return reply.code(404).send({ error: 'Narrator voice not found.' });
-  return sendAudioFile(request, reply, voice.previewPath);
+  return sendStoredAudio(request, reply, voice.previewKey);
+});
+
+// A book, its audio, its job and its controls (retry, re-narrate, remove) are only for the person who made it, or a
+// short-lived signed link the server handed them (/api/media/url). Narrator previews and Voice Lab samples aren't
+// book data and stay open. Owners come from Supabase, else the book's job state, else an older book's manifest; a
+// book with none of those is closed to everyone.
+const MEDIA_SECRET = randomBytes(32);
+const MEDIA_LINK_MS = 6 * 60 * 60 * 1000;
+const signMedia = (key: string, expires: number) => createHmac('sha256', MEDIA_SECRET).update(`${key}:${expires}`).digest('hex').slice(0, 32);
+
+// account: the book was made by a signed-in account. Those open only for that account's sign-in, checked with
+// Supabase, because the x-echo-user header alone can be set to anyone's id. Books made without signing in belong to
+// the test id the app sends (the same on every copy of the app), so they're a test-mode convenience, not private.
+type BookOwner = { userId: string; account: boolean };
+const ownerCache = new Map<string, { owner: BookOwner | undefined; until: number }>();
+
+function isOwner(owner: BookOwner, who: Requester) {
+  return owner.account ? who.signedIn && who.id === owner.userId : who.id === owner.userId || who.testId === owner.userId;
+}
+
+async function bookOwnerOf(bookId: string): Promise<BookOwner | undefined> {
+  const hit = ownerCache.get(bookId);
+  if (hit && hit.until > Date.now()) return hit.owner;
+  let owner: BookOwner | undefined;
+  const accountId = await getBookOwner(bookId).catch(() => undefined);
+  if (accountId) owner = { userId: accountId, account: true };
+  if (!owner) {
+    const state = await loadJob(bookId);
+    if (state) owner = { userId: state.userId, account: state.signedIn };
+  }
+  if (!owner) {
+    const manifest = await readText(`${bookFolder(bookId)}/manifest.json`).catch(() => undefined);
+    const userId = manifest ? (JSON.parse(manifest) as { userId?: string }).userId : undefined;
+    if (userId) owner = { userId, account: false };
+  }
+  ownerCache.set(bookId, { owner, until: Date.now() + 5 * 60 * 1000 });
+  return owner;
+}
+
+async function canReadBook(request: { headers: Record<string, string | string[] | undefined> }, bookId: string) {
+  const owner = await bookOwnerOf(bookId);
+  return Boolean(owner && isOwner(owner, await requester(request)));
+}
+
+// Book audio is the book owner's; a voice's clips are its owner's; Voice Lab samples are open.
+async function canReadFile(request: { headers: Record<string, string | string[] | undefined>; query: unknown }, key: string) {
+  const bookId = key.match(/^books\/([0-9a-f-]{36})\//i)?.[1];
+  const narratorFile = key.startsWith('narrators/');
+  if (!bookId && !narratorFile) return true;
+  const { expires, sig } = (request.query ?? {}) as { expires?: string; sig?: string };
+  if (sig && expires && Number(expires) > Date.now() && sig === signMedia(key, Number(expires))) return true;
+  if (bookId) return canReadBook(request, bookId);
+  return (await myVoices(await requester(request))).voices.some((voice) => voice.previewKey === key || voice.referenceKey === key);
+}
+
+// Plays a path stored in a Supabase row (chapters.audio_s3_url, characters.voice_sample_path,
+// narrator_voices.preview_path). Only listening files are served; uploaded books and cloning references are not.
+const PLAYABLE_PATH = /^(books\/[0-9a-f-]{36}\/(audio\.mp3|chapters\/\d{3}\.mp3|voices\/[\w-]+\.wav)|narrators\/[\w-]+\/[\w-]+\/preview\.wav|voice-lab\/[\w-]+\.wav)$/i;
+app.get('/api/files/*', async (request, reply) => {
+  const key = (request.params as { '*': string })['*'];
+  if (!PLAYABLE_PATH.test(key)) return reply.code(404).send({ error: 'File not found.' });
+  if (!(await canReadFile(request, key))) return reply.code(403).send({ error: 'That audio isn\u2019t yours.' });
+  return sendStoredAudio(request, reply, key);
+});
+
+// A playable link for a stored path, checked against the app's sign-in. Audio elements can't send headers on every
+// platform, so the app asks here first and plays the link: a signed S3 link, or a signed /api/files link on disk.
+app.get('/api/media/url', async (request, reply) => {
+  const { path: key } = z.object({ path: z.string().min(1) }).parse(request.query);
+  if (!PLAYABLE_PATH.test(key)) return reply.code(404).send({ error: 'File not found.' });
+  if (!(await canReadFile(request, key))) return reply.code(403).send({ error: 'That audio isn\u2019t yours.' });
+  const source = await playbackSource(key);
+  if (!source) return reply.code(404).send({ error: 'File not found.' });
+  if ('url' in source) return { url: source.url };
+  const expires = Date.now() + MEDIA_LINK_MS;
+  return { url: `${request.protocol}://${request.headers.host}/api/files/${key}?expires=${expires}&sig=${signMedia(key, expires)}` };
+});
+
+app.get('/api/books/:jobId/audio', async (request, reply) => {
+  const { jobId } = request.params as { jobId: string };
+  if (!isBookId(jobId)) return reply.code(404).send({ error: 'Audio not found.' });
+  if (!(await canReadBook(request, jobId))) return reply.code(403).send({ error: 'This book isn\u2019t yours.' });
+  return sendStoredAudio(request, reply, `${bookFolder(jobId)}/audio.mp3`);
 });
 
 app.get('/api/voice/audio/:file', async (request, reply) => {
@@ -832,9 +1882,10 @@ app.post('/api/voice/generate', async (request, reply) => {
 
     const referencePath = path.join(TMP_ROOT, `${voice.id.replace(/[^a-zA-Z0-9_-]/g, '_')}.wav`);
     await writeFile(referencePath, Buffer.from(previewData, 'base64'));
+    await putFile(`voice-lab/${path.basename(referencePath)}`, referencePath);
     app.log.info({ voiceId: voice.id, referencePath }, 'Gemini voice reference created');
     app.log.info({ voiceId: voice.id }, 'Starting IndexTTS narration');
-    const outputPath = await runIndexTts(referencePath, input.text, input.emotion);
+    const outputPath = await runIndexTts(referencePath, input.text, input.emotion).finally(() => rm(referencePath, { force: true }));
     app.log.info({ voiceId: voice.id, outputPath }, 'IndexTTS narration created');
     return { voiceId: voice.id, referencePath, outputPath, mimeType: 'audio/wav', audioUrl: `/api/voice/audio/${path.basename(outputPath)}` };
   } catch (error) {
@@ -842,27 +1893,6 @@ app.post('/api/voice/generate', async (request, reply) => {
     app.log.error({ error }, 'Voice generation failed');
     return reply.code(400).send({ error: message });
   }
-});
-
-// Clean up files for a specific job
-app.delete('/api/jobs/:jobId', async (request, reply) => {
-  const { jobId } = request.params as { jobId: string };
-  const files = jobFiles.get(jobId);
-  if (!files) {
-    return reply.code(404).send({ error: 'Job not found' });
-  }
-  let deletedCount = 0;
-  for (const file of files) {
-    try {
-      await access(file).then(() => rm(file)).catch(() => {});
-      deletedCount++;
-    } catch (e) {
-      // Ignore cleanup errors
-    }
-  }
-  jobFiles.delete(jobId);
-  app.log.info({ jobId, deletedCount }, 'Job files cleaned up');
-  return { jobId, deletedCount };
 });
 
 // Clean up all files older than specified hours (default 24)
@@ -875,7 +1905,8 @@ app.post('/api/cleanup', async (request, reply) => {
     for (const file of tmpFiles) {
       const filePath = path.join(TMP_ROOT, file);
       const stats = await stat(filePath);
-      if (stats.mtimeMs < cutoffTime) {
+      // Skips the S3 download cache and any in-progress segment folders.
+      if (stats.isFile() && stats.mtimeMs < cutoffTime) {
         await rm(filePath);
         deletedCount++;
       }
@@ -898,8 +1929,97 @@ if (await access(PLAYGROUND_ROUTES).then(() => true, () => false)) {
 }
 // --- End local voice playground -----------------------------------------------------------
 
-app.listen({ port: PORT, host: HOST }).then(() => {
+// Books this machine was narrating when it stopped carry on; books whose server went quiet are marked failed.
+async function resumeInterruptedBooks() {
+  const markers = (await listKeys('jobs/active/')).filter(({ key }) => key.endsWith('/marker.json'));
+  for (const { key } of markers) {
+    const jobId = key.split('/')[2];
+    const marker = JSON.parse((await readText(key)) ?? '{}') as { server?: string };
+    if (marker.server !== SERVER_NAME) continue;
+    const state = await loadJob(jobId);
+    if (!state) {
+      await deletePrefix(activeMarkerFolder(jobId)).catch(() => {});
+      continue;
+    }
+    for (const chapter of state.chapters) if (chapter.status === 'processing') chapter.status = 'queued';
+    app.log.info({ jobId, title: state.title }, 'Resuming a book interrupted by a restart');
+    publishJob(state, { stage: 'Resuming' });
+    void runBook(state);
+  }
+}
+
+// Whether another server sharing the bucket is still narrating a book: its marker's heartbeat is recent. (A quiet
+// Supabase row alone isn't proof, because that server's database writes can fail while narration carries on.)
+async function aliveElsewhere(jobId: string) {
+  const text = await readText(`${activeMarkerFolder(jobId)}marker.json`).catch(() => undefined);
+  if (!text) return false;
+  const marker = JSON.parse(text) as { server?: string; beatAt?: string };
+  return marker.server !== SERVER_NAME && Boolean(marker.beatAt) && Date.now() - Date.parse(marker.beatAt!) < STALE_MINUTES * 60_000;
+}
+
+// Only books this pipeline made (they have saved job state) are swept: the database is shared with seed and test rows
+// that sit in other states on purpose.
+async function sweepStaleBooks() {
+  try {
+    const ours = [];
+    for (const id of await getStaleBookIds(STALE_MINUTES)) if (!running.has(id) && (await loadJob(id)) && !(await aliveElsewhere(id))) ours.push(id);
+    await failInterruptedBooks(ours);
+    if (ours.length) app.log.warn({ ids: ours }, 'Marked interrupted books as failed');
+  } catch (error) {
+    app.log.warn({ error }, 'Stale book sweep failed');
+  }
+}
+
+// Local files left behind by a crash or an older version of the server. Everything here is either already in storage
+// (downloaded copies, voice references, finished audio) or a line of audio a retry could reuse, kept for a week.
+const LEFTOVER_LINE_AUDIO_DAYS = 7;
+async function clearLeftovers() {
+  // Another server on this computer narrating right now is using these files.
+  if (workerLockHolder()) return;
+  await clearLocalCopies();
+  const cutoff = Date.now() - LEFTOVER_LINE_AUDIO_DAYS * 24 * 60 * 60 * 1000;
+  let removed = 0;
+  for (const file of await readdir(MODEL_OUTPUTS)) {
+    const filePath = path.join(MODEL_OUTPUTS, file);
+    const info = await stat(filePath).catch(() => undefined);
+    if (info?.isFile() && (file.includes('.tmp.') || info.mtimeMs < cutoff)) {
+      await rm(filePath, { force: true });
+      removed += 1;
+    }
+  }
+  // Loose files in server/tmp from before storage moved to S3 go once their stored copy is confirmed: a book's audio,
+  // its WAV master and manifest (books/<id>/), a character voice (books/*/voices/), a Voice Lab voice (voice-lab/).
+  // Anything without a confirmed copy (logs, test files) stays.
+  if (storageMode !== 'local disk') {
+    const stored = new Set([...(await listKeys('books/')), ...(await listKeys('voice-lab/'))].map(({ key }) => key));
+    const storedVoices = new Set([...stored].filter((key) => key.includes('/voices/')).map((key) => path.basename(key)));
+    const copyOf = (file: string) => {
+      const book = /^([0-9a-f-]{36})\.(mp3|wav|json)$/i.exec(file);
+      if (book) return stored.has(`books/${book[1]}/${book[2] === 'json' ? 'manifest.json' : 'audio.mp3'}`) || stored.has(`books/${book[1]}/job.json`);
+      if (/^char-voice_[\w-]+\.wav$/.test(file)) return storedVoices.has(file.slice('char-'.length));
+      if (/^voice_[\w-]+\.wav$/.test(file)) return stored.has(`voice-lab/${file}`);
+      return false;
+    };
+    for (const file of await readdir(TMP_ROOT)) {
+      const filePath = path.join(TMP_ROOT, file);
+      const info = await stat(filePath).catch(() => undefined);
+      if (info?.isFile() && copyOf(file)) {
+        await rm(filePath, { force: true });
+        removed += 1;
+      }
+    }
+  }
+  if (removed) app.log.info({ removed }, 'Cleared leftover local files');
+}
+
+app.listen({ port: PORT, host: HOST }).then(async () => {
   console.log(`Echo voice server listening at http://127.0.0.1:${PORT}`);
+  await clearLeftovers().catch((error: unknown) => app.log.warn({ error }, 'Could not clear leftover local files'));
+  await resumeInterruptedBooks().catch((error: unknown) => app.log.error({ error }, 'Could not resume interrupted books'));
+  await sweepStaleBooks();
+  setInterval(() => void sweepStaleBooks(), 10 * 60_000).unref();
+  console.log(`  Storage: ${storageMode}`);
+  console.log(`  Supabase records: ${dbMode}`);
   if (HOST === '0.0.0.0') {
     const lanAddresses = Object.values(networkInterfaces()).flat().filter((item) => item?.family === 'IPv4' && !item.internal).map((item) => item!.address);
     for (const address of lanAddresses) console.log(`  On your network: http://${address}:${PORT}`);

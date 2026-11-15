@@ -1,16 +1,21 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { LayoutAnimation, Pressable, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
-import { router, useLocalSearchParams } from 'expo-router';
+import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { Screen } from '../../components/Screen';
 import { Sheet, SheetItem } from '../../components/Sheet';
+import { CastSheet } from '../../components/CastSheet';
 import { Reveal } from '../../components/Reveal';
 import { DoodleUnderline } from '../../components/Doodle';
 import { colors, fonts, type } from '../../../theme';
-import { getBookChapters, getBookCharacters } from '../../data';
-import type { Chapter, Character } from '../../data/types';
-import { playback } from '../../data/playback';
-import { notify } from '../../../lib/notify';
+import { getBook, getBookChapters, getBookCharacters, getBookProgress } from '../../data';
+import type { Book, Chapter, Character, UserProgress } from '../../data/types';
+import { playback, type QueuedChapter } from '../../data/playback';
+import { getBookJob, removeBook, renarrateBook, retryBook, stopBook } from '../../data/bookJobs';
+import { getBookCast, type CastMember } from '../../data/narrators';
+import { markChaptersSeen, notifyChapterReady } from '../../data/notifications';
+import { confirm, notify } from '../../../lib/notify';
+import { mockBooks } from '../../mock/books';
 
 // Every character gets their own colour, used on their card and wherever they appear, so the cast is easy to tell apart.
 const CAST_COLORS = ['#FF9A7A', '#62E6F0', '#FFB45E', '#B79CFF', '#7CF2B8', '#FF6FD0', '#9CC2FF'];
@@ -23,7 +28,33 @@ function hash(text: string) {
   return Math.abs(h);
 }
 
-type DisplayChapter = { number: number; title: string; minutes: number };
+// ready: playable (real audio when audioPath is set, otherwise a test book's simulated playback). The others are
+// still being narrated, or failed.
+type DisplayChapter = { id?: string; number: number; title: string; durationSec: number; state: 'ready' | 'narrating' | 'waiting' | 'failed'; audioPath: string | null };
+
+// While a book is being narrated its chapters are checked this often, so each one becomes playable as it finishes.
+const REFRESH_MS = 15000;
+
+function formatLength(sec: number) {
+  if (sec < 60) return `${Math.max(1, Math.round(sec))} sec`;
+  const minutes = Math.round(sec / 60);
+  return minutes < 60 ? `${minutes} min` : `${Math.floor(minutes / 60)} h ${minutes % 60} min`;
+}
+
+const CHAPTER_NOTE = { ready: '', narrating: 'Being narrated now', waiting: 'Waiting to be narrated', failed: 'Couldn\u2019t be narrated' } as const;
+
+function toDisplay(chapter: Chapter): DisplayChapter {
+  const state = chapter.status === 'ready' ? 'ready' : chapter.status === 'failed' ? 'failed' : chapter.status === 'processing' ? 'narrating' : 'waiting';
+  return {
+    id: chapter.id,
+    number: chapter.chapter_index + 1,
+    title: chapter.title ?? `Chapter ${chapter.chapter_index + 1}`,
+    durationSec: (chapter.audio_duration_ms ?? 0) / 1000,
+    state,
+    // Test chapters point at mock/ paths with no file behind them; those play the simulated clock.
+    audioPath: state === 'ready' && chapter.audio_s3_url && !chapter.audio_s3_url.startsWith('mock/') ? chapter.audio_s3_url : null,
+  };
+}
 type DisplayCharacter = { id: string; name: string; summary: string; voice: string; color: string };
 
 export default function BookDetailsScreen() {
@@ -34,43 +65,165 @@ export default function BookDetailsScreen() {
   const progress = Number.isFinite(parsed) ? Math.min(100, Math.max(0, parsed)) : 0;
   const cover = COVER_COLORS[hash(title) % COVER_COLORS.length];
 
+  const [book, setBook] = useState<Book | null>(null);
   const [chapters, setChapters] = useState<Chapter[]>([]);
   const [cast, setCast] = useState<Character[]>([]);
   const [showAll, setShowAll] = useState(false);
   const [menu, setMenu] = useState(false);
   const [person, setPerson] = useState<DisplayCharacter | null>(null);
+  const [record, setRecord] = useState<UserProgress | null>(null);
+  const [confirmRemove, setConfirmRemove] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [stopping, setStopping] = useState(false);
+  // The book's cast with its voices: shown for approval before narration starts, and for changes afterwards.
+  const [castSheet, setCastSheet] = useState<{ mode: 'review' | 'edit'; cast: CastMember[] } | null>(null);
+  const [awaitingCast, setAwaitingCast] = useState<CastMember[] | null>(null);
+  const reopenCast = useRef(false);
 
-  useEffect(() => {
+  const load = useCallback(() => {
     if (!params.id) return;
-    getBookChapters(params.id).then(setChapters, () => {});
-    getBookCharacters(params.id).then(setCast, () => {});
-  }, [params.id]);
+    const id = params.id;
+    getBook(id).then((next) => {
+      setBook(next);
+      // A book that isn't narrated yet may be waiting on its cast.
+      if (next && ['uploaded', 'queued', 'processing'].includes(next.status)) {
+        getBookJob(id).then((job) => setAwaitingCast(job.awaitingCast ? job.cast ?? [] : null), () => setAwaitingCast(null));
+      } else {
+        setAwaitingCast(null);
+      }
+    }, () => {});
+    getBookProgress(id).then(setRecord, () => {});
+    getBookCharacters(id).then(setCast, () => {});
+    getBookChapters(id).then((next) => {
+      setChapters((previous) => {
+        // Chapters that finish while the reader watches are announced; ones ready on first look are not.
+        if (!previous.length) markChaptersSeen(id, next.filter((c) => c.status === 'ready').map((c) => c.chapter_index));
+        for (const chapter of next) {
+          const before = previous.find((c) => c.chapter_index === chapter.chapter_index);
+          if (previous.length && chapter.status === 'ready' && before?.status !== 'ready') void notifyChapterReady(id, chapter.chapter_index, title, chapter.title ?? `Chapter ${chapter.chapter_index + 1}`);
+        }
+        return next;
+      });
+    }, () => {});
+  }, [params.id, title]);
+  useEffect(load, [load]);
+  // Back from the Voice Studio: the cast sheet opens again with the new voice listed.
+  useFocusEffect(useCallback(() => {
+    if (!reopenCast.current) return;
+    reopenCast.current = false;
+    load();
+    if (awaitingCast) setCastSheet({ mode: 'review', cast: awaitingCast });
+    else if (params.id) getBookCast(params.id).then((result) => setCastSheet({ mode: 'edit', cast: result.cast })).catch(() => {});
+  }, [awaitingCast, load, params.id]));
 
-  // Books without processed chapters yet still get a sensible list to browse.
+  const openStudio = () => {
+    reopenCast.current = true;
+    setCastSheet(null);
+    router.push('/voice-studio');
+  };
+
+  const changeVoices = () => act('Couldn\u2019t open the cast', async () => {
+    const result = await getBookCast(params.id!);
+    setCastSheet({ mode: result.awaitingCast ? 'review' : 'edit', cast: result.cast });
+  }, () => {});
+
+  // A book opened from the Library's discover rail isn't in the reader's library: no chapters, no server actions.
+  const preview = !params.id || params.id.startsWith('discover-');
+  const isSample = mockBooks.some((b) => b.id === params.id);
+  const preparing = book !== null && ['uploaded', 'queued', 'processing'].includes(book.status);
+  const stillNarrating = preparing || chapters.some((c) => c.status === 'queued' || c.status === 'processing');
+  useEffect(() => {
+    if (!stillNarrating) return;
+    const timer = setInterval(load, REFRESH_MS);
+    return () => clearInterval(timer);
+  }, [stillNarrating, load]);
+
+  // A sample book without chapter rows still gets a list to browse (it plays the simulated clock); a book that's
+  // being prepared, or a Library preview, shows none.
   const chapterList = useMemo<DisplayChapter[]>(
     () =>
       chapters.length
-        ? chapters.map((c) => ({ number: c.chapter_index + 1, title: c.title ?? `Chapter ${c.chapter_index + 1}`, minutes: Math.max(1, Math.round((c.audio_duration_ms ?? 18 * 60000) / 60000)) }))
-        : Array.from({ length: 12 }, (_, i) => ({ number: i + 1, title: `Chapter ${i + 1}`, minutes: 16 + ((i * 7) % 11) })),
-    [chapters]
+        ? chapters.map(toDisplay)
+        : preparing || !isSample
+          ? []
+          : Array.from({ length: 12 }, (_, i) => ({ number: i + 1, title: `Chapter ${i + 1}`, durationSec: (16 + ((i * 7) % 11)) * 60, state: 'ready' as const, audioPath: null })),
+    [chapters, isSample, preparing]
   );
-  const current = chapterList[Math.min(chapterList.length - 1, Math.floor((progress / 100) * chapterList.length))];
+  const single = chapterList.length === 1;
+  const ready = chapterList.filter((c) => c.state === 'ready');
+  const failedCount = chapterList.filter((c) => c.state === 'failed').length;
+  // A real book's saved place says which chapter the reader is on; test books estimate it from their progress.
+  const saved = record?.chapter_id ? chapterList.find((c) => c.id === record.chapter_id) : undefined;
+  const byProgress = saved ?? chapterList[Math.min(chapterList.length - 1, Math.floor((progress / 100) * chapterList.length))];
+  // Where Continue picks up: the chapter the listener is on, or the first one that's ready while the rest are made.
+  const current = byProgress?.state === 'ready' ? byProgress : ready[0];
+  const resumeAtSec = saved && current === saved && !record?.is_completed ? (record?.position_ms ?? 0) / 1000 : 0;
+  // Remove, retry and re-narrate work on books the reader made; the sample books have no server copy.
+  const ownBook = Boolean(book && !mockBooks.some((b) => b.id === book.id));
 
+  // Books made with Character Voices off are read entirely by the narrator.
+  const narratorOnly = (book?.model_info as { characterVoices?: string } | null)?.characterVoices === 'off';
   const people = useMemo<DisplayCharacter[]>(
     () =>
       cast.filter((c) => !c.is_narrator).map((c, i) => ({
         id: c.id,
         name: c.name,
         summary: c.summary ?? 'More about them as the story unfolds.',
-        voice: c.voice_description ?? c.voice_name ?? 'Voice assigned when the book is narrated',
+        voice: narratorOnly ? 'Read by your narrator' : c.voice_description ?? c.voice_name ?? 'Voice assigned when the book is narrated',
         color: CAST_COLORS[i % CAST_COLORS.length],
       })),
-    [cast]
+    [cast, narratorOnly]
   );
 
-  const play = (chapter: DisplayChapter) => {
-    playback.load({ title, author, chapter: chapter.title, chapterNumber: chapter.number });
+  const play = (chapter: DisplayChapter | undefined, startAtSec = 0) => {
+    if (!chapter || chapter.state !== 'ready') return;
+    const queue: QueuedChapter[] = ready.flatMap((c) => (c.audioPath ? [{ chapter: c.title, chapterNumber: c.number, chapterId: c.id, audioPath: c.audioPath, durationSec: c.durationSec }] : []));
+    void playback.load({ title, author, bookId: params.id, chapterId: chapter.id, chapter: chapter.title, chapterNumber: chapter.number, audioPath: chapter.audioPath ?? undefined, durationSec: chapter.durationSec, startAtSec, queue });
     router.push('/Test/player');
+  };
+
+  // Retry, re-narrate and remove run on the voice server; the screen refreshes to show the new chapter states.
+  const act = async (label: string, action: () => Promise<unknown>, after?: () => void) => {
+    setMenu(false);
+    setConfirmRemove(false);
+    setBusy(true);
+    try {
+      await action();
+      after ? after() : load();
+    } catch (error) {
+      notify(label, error instanceof Error ? error.message : 'The voice server didn\u2019t respond.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // Stop deletes the narration made so far and brings back Meet the cast, where the reader can start again with other
+  // voices or delete the book.
+  const stopNarration = async () => {
+    setMenu(false);
+    if (!params.id || stopping) return;
+    if (!(await confirm('Stop narrating?', 'The audio made so far is deleted and you go back to Meet the cast. The voices are kept, and you can start again or delete the book.', 'Stop'))) return;
+    setStopping(true);
+    try {
+      const result = await stopBook(params.id);
+      if (result.awaitingCast) {
+        setAwaitingCast(result.cast);
+        setCastSheet({ mode: 'review', cast: result.cast });
+      } else {
+        notify('Stopping after the voices', 'Echo is still making the cast\u2019s voices. Meet the cast appears here when they\u2019re ready, and narration won\u2019t start until you approve it.');
+      }
+      load();
+    } catch (error) {
+      notify('Couldn\u2019t stop narration', error instanceof Error ? error.message : 'The voice server didn\u2019t respond.');
+    } finally {
+      setStopping(false);
+    }
+  };
+
+  const deleteFromCast = async () => {
+    await removeBook(params.id!);
+    setCastSheet(null);
+    router.canGoBack() ? router.back() : router.replace('/Test/library');
   };
 
   const toggleChapters = () => {
@@ -78,7 +231,9 @@ export default function BookDetailsScreen() {
     setShowAll(!showAll);
   };
 
-  const visible = showAll ? chapterList : chapterList.slice(Math.max(0, current.number - 1), current.number + 3);
+  const start = current ? current.number - 1 : 0;
+  const visible = showAll || chapterList.length <= 4 ? chapterList : chapterList.slice(start, start + 4);
+  const narratingNow = chapterList.find((c) => c.state === 'narrating');
 
   return (
     <Screen interior="bookshop">
@@ -104,40 +259,85 @@ export default function BookDetailsScreen() {
 
         <Reveal index={1} style={s.progressCard}>
           <View style={s.progressLabels}>
-            <Text style={type.meta}>YOU'RE ON CHAPTER {current.number}</Text>
+            <Text style={type.meta}>{preview ? 'NOT IN YOUR LIBRARY YET' : !current ? 'BEING NARRATED' : single ? 'FULL AUDIOBOOK' : `YOU'RE ON CHAPTER ${current.number}`}</Text>
             <Text style={[s.percent, { color: cover[1] }]}>{Math.round(progress)}%</Text>
           </View>
           <View style={s.track}><View style={[s.fill, { width: `${progress}%`, backgroundColor: cover[1] }]} /></View>
-          <Pressable style={[s.continue, { backgroundColor: cover[1] }]} onPress={() => play(current)} accessibilityRole="button">
-            <Ionicons name="play" size={18} color="#18131E" />
-            <Text style={s.continueText}>{progress > 0 ? 'Continue listening' : 'Start listening'}</Text>
-          </Pressable>
+          {preview ? (
+            <>
+              <Pressable style={[s.continue, { backgroundColor: cover[1] }]} onPress={() => router.push('/Test/catalog')} accessibilityRole="button">
+                <Ionicons name="add" size={18} color="#18131E" />
+                <Text style={s.continueText}>Add it from Public Domain</Text>
+              </Pressable>
+              <Text style={type.meta}>Echo narrates it once it’s on your shelf, with a voice for every character.</Text>
+            </>
+          ) : awaitingCast ? (
+            <>
+              <Pressable style={[s.continue, { backgroundColor: colors.gold }]} onPress={() => setCastSheet({ mode: 'review', cast: awaitingCast })} accessibilityRole="button">
+                <Ionicons name="people" size={18} color="#18131E" />
+                <Text style={s.continueText}>Meet the cast</Text>
+              </Pressable>
+              <Text style={type.meta}>The voices are ready. Narration starts once you\u2019ve approved the cast.</Text>
+            </>
+          ) : (
+            <Pressable style={[s.continue, { backgroundColor: cover[1] }, !current && s.disabled]} onPress={() => play(current, resumeAtSec)} disabled={!current} accessibilityRole="button">
+              <Ionicons name={current ? 'play' : 'hourglass-outline'} size={18} color="#18131E" />
+              <Text style={s.continueText}>{!current ? 'Narrating the first chapter\u2026' : progress > 0 ? 'Continue listening' : 'Start listening'}</Text>
+            </Pressable>
+          )}
+          {failedCount > 0 && !stillNarrating && params.id && (
+            <Pressable style={s.retry} onPress={() => act('Couldn\u2019t retry', () => retryBook(params.id!))} disabled={busy} accessibilityRole="button">
+              <Ionicons name="refresh" size={16} color={colors.text} />
+              <Text style={s.retryText}>{busy ? 'Starting\u2026' : `Retry ${failedCount === 1 ? 'the failed chapter' : `${failedCount} failed chapters`}`}</Text>
+            </Pressable>
+          )}
+          {stillNarrating && !awaitingCast && current && (
+            <Text style={type.meta}>{ready.length} of {chapterList.length} chapters ready{narratingNow ? ` \u00b7 narrating ${narratingNow.title}` : ''}. New chapters appear here as they finish.</Text>
+          )}
+          {stillNarrating && !awaitingCast && ownBook && params.id && (
+            <Pressable style={s.retry} onPress={stopNarration} disabled={stopping} accessibilityRole="button">
+              <Ionicons name="stop-circle-outline" size={16} color={colors.danger} />
+              <Text style={[s.retryText, { color: colors.danger }]}>{stopping ? 'Stopping at the end of this line\u2026' : 'Stop narration'}</Text>
+            </Pressable>
+          )}
         </Reveal>
 
         <Reveal index={2} style={s.section}>
           <View style={s.sectionHead}>
-            <Text style={s.sectionTitle}>Chapters</Text>
-            <Pressable onPress={toggleChapters} hitSlop={8} accessibilityRole="button">
-              <Text style={[s.seeAll, { color: cover[1] }]}>{showAll ? 'Show less' : `All ${chapterList.length}`}</Text>
-            </Pressable>
+            <Text style={s.sectionTitle}>{single ? 'Audiobook' : 'Chapters'}</Text>
+            {chapterList.length > 4 && (
+              <Pressable onPress={toggleChapters} hitSlop={8} accessibilityRole="button">
+                <Text style={[s.seeAll, { color: cover[1] }]}>{showAll ? 'Show less' : `All ${chapterList.length}`}</Text>
+              </Pressable>
+            )}
           </View>
-          <View style={s.chapterCard}>
-            {visible.map((chapter, i) => {
-              const isCurrent = chapter.number === current.number;
-              return (
-                <Pressable key={chapter.number} style={[s.chapterRow, i === visible.length - 1 && { borderBottomWidth: 0 }]} onPress={() => play(chapter)} accessibilityRole="button" accessibilityLabel={`Play ${chapter.title}`}>
-                  <View style={[s.chapterNumber, isCurrent && { backgroundColor: cover[1], borderColor: cover[1] }]}>
-                    {isCurrent ? <Ionicons name="play" size={12} color="#18131E" /> : <Text style={s.chapterNumberText}>{chapter.number}</Text>}
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={s.chapterName}>{chapter.title}</Text>
-                    <Text style={type.meta}>{chapter.minutes} min{isCurrent ? ' · up next' : ''}</Text>
-                  </View>
-                  <Ionicons name="play-circle-outline" size={22} color="rgba(255,255,255,0.4)" />
-                </Pressable>
-              );
-            })}
-          </View>
+          {chapterList.length === 0 ? (
+            <Text style={type.body}>{preview ? 'Chapters appear here once the book is on your shelf and narrated.' : 'Echo is reading the book and finding its chapters. They appear here as soon as narration starts.'}</Text>
+          ) : (
+            <View style={s.chapterCard}>
+              {visible.map((chapter, i) => {
+                const isCurrent = chapter.number === current?.number;
+                const playable = chapter.state === 'ready';
+                const detail = playable ? `${formatLength(chapter.durationSec)}${isCurrent && !single ? ' \u00b7 up next' : ''}` : CHAPTER_NOTE[chapter.state];
+                return (
+                  <Pressable key={chapter.number} style={[s.chapterRow, i === visible.length - 1 && { borderBottomWidth: 0 }]} onPress={() => play(chapter)} disabled={!playable} accessibilityRole="button" accessibilityState={{ disabled: !playable }} accessibilityLabel={playable ? `Play ${chapter.title}` : `${chapter.title}, ${detail}`}>
+                    <View style={[s.chapterNumber, isCurrent && { backgroundColor: cover[1], borderColor: cover[1] }]}>
+                      {isCurrent ? <Ionicons name="play" size={12} color="#18131E" /> : <Text style={s.chapterNumberText}>{chapter.number}</Text>}
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={[s.chapterName, !playable && { color: colors.dim }]}>{chapter.title}</Text>
+                      <Text style={[type.meta, chapter.state === 'failed' && { color: colors.danger }]}>{detail}</Text>
+                    </View>
+                    <Ionicons
+                      name={playable ? 'play-circle-outline' : chapter.state === 'failed' ? 'alert-circle-outline' : chapter.state === 'narrating' ? 'mic-outline' : 'time-outline'}
+                      size={22}
+                      color="rgba(255,255,255,0.4)"
+                    />
+                  </Pressable>
+                );
+              })}
+            </View>
+          )}
         </Reveal>
 
         <Reveal index={3} style={s.section}>
@@ -145,11 +345,11 @@ export default function BookDetailsScreen() {
             <View>
               <Text style={s.sectionTitle}>The cast</Text>
               <DoodleUnderline width={96} color={cover[1]} seed={title} delay={600} />
-              <Text style={type.meta}>Each one has a voice of their own</Text>
+              <Text style={type.meta}>{narratorOnly ? 'Your narrator reads every part' : 'Each one has a voice of their own'}</Text>
             </View>
           </View>
           {people.length === 0 ? (
-            <Text style={[type.body, { marginTop: 4 }]}>Characters appear here once Echo has read the book.</Text>
+            <Text style={[type.body, { marginTop: 4 }]}>{preview ? 'Echo finds the characters and gives each a voice when it narrates the book.' : 'Characters appear here once Echo has read the book.'}</Text>
           ) : (
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 12, paddingRight: 20 }}>
               {people.map((p) => (
@@ -167,11 +367,40 @@ export default function BookDetailsScreen() {
       </ScrollView>
 
       <Sheet visible={menu} onClose={() => setMenu(false)} title={title}>
-        <SheetItem icon="play-skip-back-outline" label="Play from the beginning" onPress={() => { setMenu(false); play(chapterList[0]); }} />
-        <SheetItem icon="mic-outline" label="Change narrator" onPress={() => { setMenu(false); router.push('/narrator-voices'); }} />
+        {ready.length > 0 && <SheetItem icon="play-skip-back-outline" label="Play from the beginning" onPress={() => { setMenu(false); play(ready[0]); }} />}
+        <SheetItem icon="mic-outline" label="Voice Studio" detail="Design or record voices" onPress={() => { setMenu(false); router.push('/voice-studio'); }} />
+        {ownBook && params.id && !narratorOnly && (awaitingCast || !stillNarrating) && (
+          <SheetItem icon="people-outline" label={awaitingCast ? 'Meet the cast' : 'Change the voices'} detail={awaitingCast ? 'Approve the voices' : 'Any part, any voice'} onPress={changeVoices} />
+        )}
+        {ownBook && params.id && stillNarrating && !awaitingCast && (
+          <SheetItem icon="stop-circle-outline" label="Stop narration" detail="Back to Meet the cast" onPress={stopNarration} />
+        )}
+        {ownBook && params.id && !stillNarrating && (
+          <SheetItem icon="sync-outline" label="Re-narrate with my narrator" detail="Reads every chapter again" onPress={() => act('Couldn\u2019t re-narrate', () => renarrateBook(params.id!))} />
+        )}
         <SheetItem icon="share-outline" label="Share" onPress={() => { setMenu(false); Share.share({ message: `I'm listening to ${title} by ${author} on Echo.` }).catch(() => {}); }} />
-        <SheetItem icon="trash-outline" label="Remove from library" danger onPress={() => { setMenu(false); notify('Not yet', 'Removing books arrives with the library database.'); }} />
+        {!preview && <SheetItem icon="trash-outline" label="Remove from library" danger onPress={() => { setMenu(false); ownBook ? setConfirmRemove(true) : notify('Test book', 'Sample books can\u2019t be removed.'); }} />}
       </Sheet>
+
+      <Sheet visible={confirmRemove} onClose={() => setConfirmRemove(false)} title={`Remove ${title}?`}>
+        <Text style={[type.body, { marginBottom: 8 }]}>Its audio and chapters are deleted for good. Narration that's still running stops.</Text>
+        <SheetItem icon="trash-outline" label="Remove for good" danger onPress={() => params.id && act('Couldn\u2019t remove the book', () => removeBook(params.id!), () => (router.canGoBack() ? router.back() : router.replace('/Test/library')))} />
+        <SheetItem icon="close-outline" label="Keep it" onPress={() => setConfirmRemove(false)} />
+      </Sheet>
+
+      {params.id && castSheet && (
+        <CastSheet
+          visible
+          bookId={params.id}
+          title={title}
+          cast={castSheet.cast}
+          mode={castSheet.mode}
+          onClose={() => setCastSheet(null)}
+          onDone={() => { setCastSheet(null); setAwaitingCast(null); load(); }}
+          onOpenStudio={openStudio}
+          onDelete={castSheet.mode === 'review' && ownBook ? deleteFromCast : undefined}
+        />
+      )}
 
       <Sheet visible={person !== null} onClose={() => setPerson(null)}>
         {person && (
@@ -212,6 +441,9 @@ const s = StyleSheet.create({
   fill: { height: '100%', borderRadius: 3 },
   continue: { marginTop: 4, height: 52, borderRadius: 26, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 },
   continueText: { fontFamily: fonts.sansBold, fontSize: 16, color: '#18131E' },
+  disabled: { opacity: 0.55 },
+  retry: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, height: 44, borderRadius: 22, borderWidth: 1, borderColor: colors.border },
+  retryText: { fontFamily: fonts.sansBold, fontSize: 14, color: colors.text },
   section: { marginTop: 30 },
   sectionHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: 12 },
   sectionTitle: { fontFamily: fonts.serif, fontSize: 22, color: colors.text },

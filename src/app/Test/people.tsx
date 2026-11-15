@@ -21,6 +21,7 @@ export default function People() {
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<UserSearchResult[]>([]);
+  const [searching, setSearching] = useState(false);
   const [requested, setRequested] = useState<Set<string>>(new Set());
 
   const load = useCallback(() => {
@@ -31,9 +32,19 @@ export default function People() {
 
   // Search as you type, after a short pause so we don't query on every keystroke.
   useEffect(() => {
-    if (query.trim().length < 2) return setResults([]);
-    const timer = setTimeout(() => searchUsers(supabase, query).then(setResults, () => setResults([])), 300);
-    return () => clearTimeout(timer);
+    if (query.trim().replace(/^@+/, '').length < 2) {
+      setResults([]);
+      setSearching(false);
+      return;
+    }
+    let active = true;
+    setSearching(true);
+    const timer = setTimeout(() => {
+      searchUsers(supabase, query)
+        .then((found) => active && setResults(found), () => active && setResults([]))
+        .finally(() => active && setSearching(false));
+    }, 300);
+    return () => { active = false; clearTimeout(timer); };
   }, [query]);
 
   const add = async (person: UserSearchResult) => {
@@ -41,6 +52,11 @@ export default function People() {
       await sendFriendRequest(supabase, person.id);
       setRequested(new Set(requested).add(person.id));
     } catch (e) {
+      // A request between the two of you already exists, in one direction or the other.
+      if ((e as { code?: string }).code === '23505') {
+        load();
+        return;
+      }
       notify('Could not send request', (e as Error).message);
     }
   };
@@ -54,26 +70,34 @@ export default function People() {
     }
   };
 
-  const known = new Set([...(data?.friends ?? []), ...(data?.outgoingRequests ?? []), ...(data?.incomingRequests ?? [])].map((f) => f.other_user.id));
+  const friendIds = new Set((data?.friends ?? []).map((f) => f.other_user.id));
+  const sentIds = new Set((data?.outgoingRequests ?? []).map((f) => f.other_user.id));
+  const incoming = new Map((data?.incomingRequests ?? []).map((f) => [f.other_user.id, f.id]));
 
   return (
     <Screen interior="cafe">
       <PageHeader title="People" eyebrow="FRIENDS" fallback="/Test/community" />
       <View style={s.field}>
         <Ionicons name="person-add-outline" size={18} color={colors.dim} />
-        <TextInput value={query} onChangeText={setQuery} placeholder="Find friends by name or username" placeholderTextColor={colors.faint} style={s.input} autoCapitalize="none" />
+        <TextInput value={query} onChangeText={setQuery} placeholder="Search by name or @username" placeholderTextColor={colors.faint} style={s.input} autoCapitalize="none" autoCorrect={false} />
       </View>
 
       <ScrollView contentContainerStyle={s.page} keyboardShouldPersistTaps="handled">
-        {query.trim().length >= 2 ? (
-          results.length === 0 ? (
+        {query.trim().replace(/^@+/, '').length >= 2 ? (
+          searching && results.length === 0 ? (
+            <Text style={[type.body, { textAlign: 'center', marginTop: 20 }]}>Searching…</Text>
+          ) : results.length === 0 ? (
             <Text style={[type.body, { textAlign: 'center', marginTop: 20 }]}>No listeners found for “{query.trim()}”.</Text>
           ) : (
             results.map((p, i) => (
               <Reveal key={p.id} index={i}>
                 <PersonRow person={p}>
-                  {known.has(p.id) || requested.has(p.id) ? (
-                    <Text style={type.meta}>{requested.has(p.id) ? 'Requested' : 'Connected'}</Text>
+                  {friendIds.has(p.id) ? (
+                    <Text style={type.meta}>Friends</Text>
+                  ) : incoming.has(p.id) ? (
+                    <SmallButton label="Accept" icon="checkmark" onPress={() => respond(incoming.get(p.id)!, true)} />
+                  ) : sentIds.has(p.id) || requested.has(p.id) ? (
+                    <Text style={type.meta}>Requested</Text>
                   ) : (
                     <SmallButton label="Add" icon="add" onPress={() => add(p)} />
                   )}
@@ -98,7 +122,7 @@ export default function People() {
             ))}
             <Text style={s.section}>FRIENDS · {data.friends.length}</Text>
             {data.friends.length === 0 ? (
-              <EmptyState title="Listening is better together" body="Search above to find friends and see what they're reading." />
+              <EmptyState title="Listening is better together" body="Search above by name or username, or add people you meet in a book room." />
             ) : (
               data.friends.map((f, i) => (
                 <Reveal key={f.id} index={i}>

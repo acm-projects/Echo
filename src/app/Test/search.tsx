@@ -6,8 +6,9 @@ import { Screen } from '../../components/Screen';
 import { PageHeader } from '../../components/PageHeader';
 import { EmptyState } from '../../components/EmptyState';
 import { colors, fonts, type } from '../../../theme';
-import { getCommunityBooks, getMyBooks } from '../../data';
-import type { Book, CommunityBook } from '../../data/types';
+import { getMyBooks } from '../../data';
+import { getRooms, shelfLabel, type Room } from '../../data/community';
+import type { Book } from '../../data/types';
 
 type Result = { id: string; title: string; subtitle: string; kind: 'library' | 'community'; roomId?: string };
 
@@ -16,11 +17,11 @@ const SUGGESTIONS = ['mystery', 'fantasy', 'classic', 'romance'];
 export default function Search() {
   const [query, setQuery] = useState('');
   const [mine, setMine] = useState<Book[]>([]);
-  const [community, setCommunity] = useState<CommunityBook[]>([]);
+  const [rooms, setRooms] = useState<Room[]>([]);
 
   useEffect(() => {
     getMyBooks().then(setMine, () => {});
-    getCommunityBooks().then(setCommunity, () => {});
+    getRooms().then(setRooms, () => {});
   }, []);
 
   const results = useMemo<Result[]>(() => {
@@ -29,13 +30,20 @@ export default function Search() {
     const hit = (...fields: (string | null | undefined)[]) => fields.some((f) => f?.toLowerCase().includes(q));
     return [
       ...mine.filter((b) => hit(b.title, b.author, b.description)).map((b) => ({ id: b.id, title: b.title, subtitle: b.author ?? 'Unknown author', kind: 'library' as const })),
-      ...community.filter((b) => hit(b.title, b.description, ...b.tags)).map((b) => ({ id: b.book_id, roomId: b.id, title: b.title, subtitle: b.tags.slice(0, 3).join(' · ') || 'Community', kind: 'community' as const })),
+      // Public rooms, plus private ones the reader is already in (RLS hides the rest).
+      ...rooms.filter((r) => hit(r.name, r.bookTitle, r.bookAuthor)).map((r) => ({
+        id: r.id,
+        roomId: r.id,
+        title: r.name,
+        subtitle: [r.visibility === 'private' ? 'Private room' : 'Public room', r.name === r.bookTitle ? null : r.bookTitle, shelfLabel(r), r.joined ? 'joined' : `${r.members} ${r.members === 1 ? 'member' : 'members'}`].filter(Boolean).join(' · '),
+        kind: 'community' as const,
+      })),
     ];
-  }, [community, mine, query]);
+  }, [rooms, mine, query]);
 
   const open = (r: Result) =>
     r.kind === 'community' && r.roomId
-      ? router.push({ pathname: '/Test/room', params: { id: r.roomId } })
+      ? router.push({ pathname: '/Test/room', params: { id: r.roomId, title: r.title } })
       : router.push({ pathname: '/Test/book_details', params: { id: r.id, title: r.title, author: r.subtitle } });
 
   return (
@@ -71,7 +79,7 @@ export default function Search() {
               <View style={s.spine}><Ionicons name={r.kind === 'library' ? 'book' : 'people'} size={18} color={colors.text} /></View>
               <View style={{ flex: 1 }}>
                 <Text style={s.title} numberOfLines={1}>{r.title}</Text>
-                <Text style={type.meta} numberOfLines={1}>{r.kind === 'library' ? `In your library · ${r.subtitle}` : `Book room · ${r.subtitle}`}</Text>
+                <Text style={type.meta} numberOfLines={1}>{r.kind === 'library' ? `In your library · ${r.subtitle}` : r.subtitle}</Text>
               </View>
               <Ionicons name="chevron-forward" size={18} color={colors.faint} />
             </Pressable>

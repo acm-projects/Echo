@@ -157,7 +157,8 @@ export async function searchUsers(
 	text: string,
 ): Promise<UserSearchResult[]> {
 	const userId = await getAuthenticatedUserId(supabase)
-	const query = text.trim()
+	// "@juju649" searches the same as "juju649"
+	const query = text.trim().replace(/^@+/, '')
 	if (!query) return []
 
 	const pattern = `%${query.replace(/[\\%_]/g, '\\$&')}%`

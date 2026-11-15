@@ -6,7 +6,7 @@ import { GradientButton } from '../../components/GradientButton';
 import { ClientOnly } from '../../../lib/ClientOnly';
 import { colors, fonts, type } from '../../../theme';
 import { notify } from '../../../lib/notify';
-import { VOICE_SERVER_URL as SERVER_URL } from '../../data/voiceServer';
+import { VOICE_SERVER_URL as SERVER_URL, voiceServerHeaders } from '../../data/voiceServer';
 
 export default function VoiceLabRoute() {
   return <ClientOnly><VoiceLab /></ClientOnly>;
@@ -26,7 +26,7 @@ function VoiceLab() {
     try {
       const response = await fetch(`${SERVER_URL}/api/voice/generate`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: { 'content-type': 'application/json', ...await voiceServerHeaders() },
         body: JSON.stringify({ voiceDescription, text, emotion, displayName: 'Echo voice lab' }),
       });
       const data = await response.json() as { error?: string; voiceId?: string; audioUrl?: string };
