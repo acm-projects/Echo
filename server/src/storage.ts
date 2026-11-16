@@ -47,7 +47,20 @@ function cachePath(key: string) {
 
 export function contentTypeFor(key: string) {
   const ext = path.extname(key).toLowerCase();
-  return ({ '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.json': 'application/json', '.pdf': 'application/pdf', '.epub': 'application/epub+zip', '.txt': 'text/plain; charset=utf-8', '.md': 'text/markdown; charset=utf-8' } as Record<string, string>)[ext] ?? 'application/octet-stream';
+
+  return ({
+    '.mp3': 'audio/mpeg',
+    '.wav': 'audio/wav',
+    '.json': 'application/json',
+    '.pdf': 'application/pdf',
+    '.png': 'image/png',
+    '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg',
+    '.webp': 'image/webp',
+    '.epub': 'application/epub+zip',
+    '.txt': 'text/plain;charset=utf-8',
+    '.md': 'text/markdown; charset=utf-8',
+  } as Record<string, string>)[ext] ?? 'application/octet-stream';
 }
 
 export async function putFile(key: string, filePath: string) {

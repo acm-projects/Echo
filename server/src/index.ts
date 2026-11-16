@@ -14,7 +14,9 @@ import Anthropic from '@anthropic-ai/sdk';
 import { zodOutputFormat } from '@anthropic-ai/sdk/helpers/zod';
 import { chunkText, extractBook, gutenbergBook, wordCount, type ExtractedBook } from './book-text.js';
 import { clearLocalCopies, deleteKeys, deletePrefix, dropLocalCopies, initStorage, listKeys, localCopy, playbackSource, putBytes, putBytesKeepingLocal, putFile, readText, storageMode } from './storage.js';
-import { dbMode, deleteNarratorVoice, failInterruptedBooks, resetChapterAudio, getBookOwner, getStaleBookIds, getNarratorVoices, getVoiceUsage, initDb, setBookCast, setBookChapters, setBookDeleted, setBookFailed, setBookProcessing, setBookQueued, setBookReady, setBookSource, setChapterAudio, setChapterStatus, setCharacterVoice, setNarratorSample, setNarratorVoice, setSelectedNarrator, touchBook, userFromAuthorization } from './db.js';
+import { dbMode, deleteNarratorVoice, failInterruptedBooks, resetChapterAudio, getBookOwner, getStaleBookIds, getNarratorVoices, getVoiceUsage, initDb, setBookCast, setBookChapters, setBookDeleted, setBookFailed, setBookProcessing, setBookQueued, setBookReady, setBookSource, setChapterAudio, setChapterStatus, setCharacterVoice, setNarratorSample, setNarratorVoice, setSelectedNarrator, touchBook, userFromAuthorization, setBookCover } from './db.js';
+import { generatePdfCover } from './book-cover.js';
+import { randomUUID as coverUUID } from 'node:crypto';
 
 const SERVER_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const REPO_ROOT = path.resolve(SERVER_ROOT, '..');
@@ -1115,6 +1117,23 @@ async function runBook(state: JobState, sourceBuffer?: Buffer) {
     if (sourceBuffer) {
       await putBytes(state.sourceKey, sourceBuffer);
       await record('book', () => setBookSource({ id: jobId, userId: state.userId, title: state.title, author: state.author, sourcePath: state.sourceKey, sizeBytes: sourceBuffer.length }));
+      try {
+        const coverPath = await generatePdfCover(
+        jobId,
+        state.sourceKey,
+        sourceBuffer
+      );
+
+      if (coverPath) {
+        await record('cover', () => setBookCover(jobId, coverPath));
+        app.log.info({ jobId, coverPath }, 'Book cover generated');
+      }
+    } catch (error) {
+      app.log.warn(
+        { jobId, error },
+        'Could not generate PDF cover'
+      );
+    }
     } else {
       await record('book', () => setBookProcessing(jobId));
     }
@@ -1836,7 +1855,8 @@ async function canReadFile(request: { headers: Record<string, string | string[] 
 
 // Plays a path stored in a Supabase row (chapters.audio_s3_url, characters.voice_sample_path,
 // narrator_voices.preview_path). Only listening files are served; uploaded books and cloning references are not.
-const PLAYABLE_PATH = /^(books\/[0-9a-f-]{36}\/(audio\.mp3|chapters\/\d{3}\.mp3|voices\/[\w-]+\.wav)|narrators\/[\w-]+\/[\w-]+\/preview\.wav|voice-lab\/[\w-]+\.wav)$/i;
+
+const PLAYABLE_PATH = /^(books\/[0-9a-f-]{36}\/(audio\.mp3|chapters\/\d{3}\.mp3|voices\/[\w-]+\.wav|cover-original\.png|cover-custom-[0-9a-f-]{36}\.(png|jpe?g|webp))|narrators\/[\w-]+\/[\w-]+\/preview\.wav|voice-lab\/[\w-]+\.wav)$/i;
 app.get('/api/files/*', async (request, reply) => {
   const key = (request.params as { '*': string })['*'];
   if (!PLAYABLE_PATH.test(key)) return reply.code(404).send({ error: 'File not found.' });
@@ -1856,6 +1876,116 @@ app.get('/api/media/url', async (request, reply) => {
   const expires = Date.now() + MEDIA_LINK_MS;
   return { url: `${request.protocol}://${request.headers.host}/api/files/${key}?expires=${expires}&sig=${signMedia(key, expires)}` };
 });
+
+
+const COVER_MAX_BYTES = 5 * 1024 * 1024;
+
+const COVER_TYPES = {
+  'image/png': 'png',
+  'image/jpeg': 'jpg',
+  'image/webp': 'webp',
+} as const;
+
+app.post('/api/books/:jobId/cover', async (request, reply) => {
+  const { jobId } = request.params as { jobId: string };
+  const who = await requester(request);
+
+  if (!who.signedIn) {
+    return reply.code(401).send({ error: 'Sign in to change a cover.' });
+  }
+
+  const owner = await getBookOwner(jobId);
+
+  if (!owner || owner !== who.id) {
+    return reply.code(404).send({ error: 'Book not found.' });
+  }
+
+  try {
+    const upload = await request.file({
+      limits: { fileSize: COVER_MAX_BYTES, files: 1 },
+    });
+
+    if (!upload) {
+      return reply.code(400).send({ error: 'Choose a cover image.' });
+    }
+
+    const extension = COVER_TYPES[upload.mimetype as keyof typeof COVER_TYPES];
+
+    if (!extension) {
+      return reply.code(400).send({
+        error: 'Choose a PNG, JPEG, or WebP image.',
+      });
+    }
+
+    const buffer = await upload.toBuffer();
+
+    const isPng =
+      extension === 'png' &&
+      buffer.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
+
+    const isJpeg =
+      extension === 'jpg' &&
+      buffer.length >= 3 &&
+      buffer[0] === 0xff &&
+      buffer[1] === 0xd8 &&
+      buffer[2] === 0xff;
+
+    const isWebp =
+      extension === 'webp' &&
+      buffer.subarray(0, 4).toString() === 'RIFF' &&
+      buffer.subarray(8, 12).toString() === 'WEBP';
+
+    if (!buffer.length || buffer.length > COVER_MAX_BYTES || !(isPng || isJpeg || isWebp)) {
+      return reply.code(400).send({ error: 'Invalid cover image.' });
+    }
+
+    const coverPath = `books/${jobId}/cover-custom-${coverUUID()}.${extension}`;
+
+    await putBytes(coverPath, buffer);
+    await setBookCover(jobId, coverPath);
+
+    return { cover_image_path: coverPath };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Cover upload failed.';
+
+    if (/file.*large|size.*limit|too large/i.test(message)) {
+      return reply.code(413).send({ error: 'Choose an image smaller than 5 MB.' });
+    }
+
+    request.log.error({ error }, 'Cover upload failed');
+
+    return reply.code(500).send({ error: 'Could not save the cover.' });
+  }
+});
+
+app.post('/api/books/:jobId/cover/restore', async (request, reply) => {
+  const { jobId } = request.params as { jobId: string };
+  const who = await requester(request);
+
+  if (!who.signedIn) {
+    return reply.code(401).send({ error: 'Sign in to restore a cover.' });
+  }
+
+  const owner = await getBookOwner(jobId);
+
+  if (!owner || owner !== who.id) {
+    return reply.code(404).send({ error: 'Book not found.' });
+  }
+
+  const coverPath = `books/${jobId}/cover-original.png`;
+  const source = await playbackSource(coverPath);
+
+  if (!source) {
+    return reply.code(404).send({
+      error: 'This book does not have an original PDF cover.',
+    });
+  }
+
+  await setBookCover(jobId, coverPath);
+
+  return { cover_image_path: coverPath };
+});
+
 
 app.get('/api/books/:jobId/audio', async (request, reply) => {
   const { jobId } = request.params as { jobId: string };
