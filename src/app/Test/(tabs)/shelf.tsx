@@ -5,12 +5,12 @@ import { Ionicons } from '@expo/vector-icons';
 
 import { Screen } from '../../../components/Screen';
 import { Reveal } from '../../../components/Reveal';
-import { Jacket } from '../../../components/Jacket';
-import { CityLoader } from '../../../components/CityLoader';
+import { BookCover } from '../../../components/BookCover';import { CityLoader } from '../../../components/CityLoader';
 import { colors, fonts, radius, scenes } from '../../../../theme';
 import { loadShelf, type DisplayBook } from '../../../data/shelf';
 import { resumeBook } from '../../../data/resume';
 import { supabase } from '../../../../lib/supabase';
+import { Jacket } from '@/components/Jacket';
 
 const accent = scenes.aurora.accent;
 
@@ -94,7 +94,13 @@ export default function Shelf() {
             <Text style={s.sectionTitle}>Continue listening</Text>
             <Text style={s.sectionSubtitle}>Pick up right where you left off</Text>
             <Pressable style={s.continue} onPress={() => resume(current)} accessibilityRole="button" accessibilityLabel={`Continue ${current.title}`}>
-              <Jacket title={current.title} author={current.author} accent={current.accent} width={74} />
+            <BookCover
+              title={current.title}
+              author={current.author}
+              accent={current.accent}
+              width={74}
+              coverPath={current.cover_image_path}
+            />
               <View style={{ flex: 1, justifyContent: 'center', gap: 4 }}>
                 <Text style={[s.label, { color: accent }]}>IN PROGRESS</Text>
                 <Text style={s.bookTitle} numberOfLines={2}>{current.title}</Text>
@@ -152,7 +158,13 @@ export default function Shelf() {
             <View style={s.grid}>
               {shown.map((book) => (
                 <Pressable key={book.id} style={({ pressed }) => [{ width: cover }, pressed && { transform: [{ translateY: -4 }] }]} onPress={() => openBook(book)} accessibilityRole="button" accessibilityLabel={`${book.title}, ${book.progress}% listened`}>
-                  <Jacket title={book.title} author={book.author} accent={book.accent} width={cover} />
+                  <BookCover
+                    title={book.title}
+                    author={book.author}
+                    accent={book.accent}
+                    width={cover}
+                    coverPath={book.cover_image_path}
+                  />
                   {book.progress > 0 && book.progress < 100 && <View style={[s.ribbon, { height: 16 + book.progress * 0.4 }]} />}
                   <Text style={s.gridTitle} numberOfLines={1}>{book.title}</Text>
                   <Text style={s.gridMeta}>{book.status !== 'ready' ? 'Processing…' : book.progress >= 100 ? 'Finished' : book.progress > 0 ? `${book.progress}% listened` : 'Not started'}</Text>
