@@ -1,6 +1,7 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import process from 'node:process';
 import type { Database } from '../../lib/database.types.js';
+import { generatePdfCover } from './book-cover.js';
 
 // Setters that record where the server put things in S3 on the Supabase rows the app reads. They write with the
 // service_role key, because chapters, characters, and narrator_voices are server-written by design (RLS gives users
@@ -248,4 +249,15 @@ export async function getVoiceUsage(userId: string, voiceIds: string[]): Promise
 export async function getNarratorVoices(userId: string) {
   if (!db) return [];
   return (await run('getNarratorVoices', db.from('narrator_voices').select('voice_id, name, description, sample_text, reference_path, preview_path, is_selected, created_at').eq('user_id', userId))) ?? [];
+}
+
+export async function setBookCover(bookId: string, coverPath: string) {
+  if (!db) return;
+
+  await run(
+    'setBookCover',
+    db.from('books')
+      .update({ cover_image_path: coverPath })
+      .eq('id', bookId)
+  );
 }

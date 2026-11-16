@@ -26,3 +26,35 @@ export async function getContinueListening(supabase: DbClient) {
   if (error) throw error
   return data
 }
+
+export async function saveProgress(
+  supabase: DbClient,
+  bookId: string,
+  chapterId: string,
+  positionMs: number,
+  playbackSpeed: number,
+  isCompleted: boolean,
+) {
+  const { data, error } = await supabase.rpc('upsert_progress', {
+    p_book_id: bookId,
+    p_chapter_id: chapterId,
+    p_position_ms: positionMs,
+    p_client_updated_at: new Date().toISOString(),
+    p_playback_speed: playbackSpeed,
+    p_is_completed: isCompleted,
+  })
+
+  if (error) throw error
+  return data
+}
+
+export async function deleteProgress(supabase: DbClient, bookId: string) {
+  const { data, error } = await supabase
+    .from('user_progress')
+    .delete()
+    .eq('book_id', bookId)
+    .select()
+
+  if (error) throw error
+  return data
+}
