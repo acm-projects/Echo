@@ -19,17 +19,59 @@ function openRoom(room: Room) {
   router.push({ pathname: '/Test/room', params: { id: room.id, title: room.name } });
 }
 
-// Loads on every visit to the tab, so a post made in a room shows up here straight away.
+//auto refresh
 function useLoad<T>(load: () => Promise<T>) {
   const [data, setData] = useState<T | null>(null);
   const [error, setError] = useState<Error | null>(null);
+
   const reload = useCallback(() => {
-    let active = true;
     setError(null);
-    load().then((next) => active && setData(next), (e: Error) => active && setError(e));
-    return () => { active = false; };
+
+    load().then(
+      (next) => setData(next),
+      (e: Error) => setError(e)
+    );
   }, [load]);
-  useFocusEffect(reload);
+
+  useFocusEffect(
+    useCallback(() => {
+      let active = true;
+      let loading = false;
+
+      const refresh = async () => {
+        if (!active || loading) return;
+
+        loading = true;
+
+        try {
+          const next = await load();
+
+          if (active) {
+            setData(next);
+            setError(null);
+          }
+        } catch (e) {
+          if (active) {
+            setError(e instanceof Error ? e : new Error('Could not refresh community'));
+          }
+        } finally {
+          loading = false;
+        }
+      };
+
+      void refresh();
+
+      const interval = setInterval(() => {
+        void refresh();
+      }, 5000);
+
+      return () => {
+        active = false;
+        clearInterval(interval);
+      };
+    }, [load])
+  );
+
   return { data, error, reload };
 }
 

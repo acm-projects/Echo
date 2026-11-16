@@ -39,8 +39,43 @@ export default function Room() {
     );
     return () => { active = false; };
   }, [id]);
-  // Reloaded on every visit, so chapters listened to since unlock the spoilers they reach.
-  useFocusEffect(load);
+  // Auto-refresh posts every 4 seconds
+  useFocusEffect(
+  useCallback(() => {
+    let active = true;
+    let refreshing = false;
+
+    load();
+
+    const refreshPosts = async () => {
+      if (!active || refreshing || !id) return;
+
+      refreshing = true;
+
+      try {
+        const posts = await getRoomPosts(id);
+
+        if (active) {
+          setData((current) =>
+            current ? { ...current, posts } : current
+          );
+        }
+      } catch {
+      } finally {
+        refreshing = false;
+      }
+    };
+
+    const interval = setInterval(() => {
+      void refreshPosts();
+    }, 4000);
+
+    return () => {
+      active = false;
+      clearInterval(interval);
+    };
+  }, [id, load])
+);
 
   const room = data?.room ?? null;
   const title = room?.name ?? params.title ?? 'Book room';
