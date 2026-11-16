@@ -1925,7 +1925,12 @@ app.post('/api/cleanup', async (request, reply) => {
 const PLAYGROUND_ROUTES = path.join(SERVER_ROOT, 'playground', 'routes.ts');
 if (await access(PLAYGROUND_ROUTES).then(() => true, () => false)) {
   const { registerPlayground } = await import(pathToFileURL(PLAYGROUND_ROUTES).href);
-  await registerPlayground(app, { postJson, runIndexTts, speakWithVoice, runProcess, sendAudioFile, ensureConfiguration, shapeDialogueEmotion, capNarratorEmotion, dialogueSpeechText, EMOTIONS, FFMPEG });
+  await registerPlayground(app, {
+    postJson, runIndexTts, speakWithVoice, runProcess, sendAudioFile, ensureConfiguration, shapeDialogueEmotion, capNarratorEmotion, dialogueSpeechText, EMOTIONS, FFMPEG,
+    // The signed-in reader's Voice Studio voices, so the playground can test the voices the app actually uses.
+    studioVoices: async (request: { headers: Record<string, string | string[] | undefined> }) => (await myVoices(await requester(request))).voices,
+    localCopy, isClonedVoice, cloneEmotion, pacingFor, REPO_ROOT,
+  });
 }
 // --- End local voice playground -----------------------------------------------------------
 

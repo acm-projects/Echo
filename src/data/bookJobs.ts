@@ -22,8 +22,9 @@ export type BookJob = {
 const POLL_INTERVAL_MS = 3000;
 
 async function readJson<T>(response: Response) {
-  const data = await response.json() as T & { error?: string };
-  if (!response.ok) throw new Error(data.error ?? `Voice server request failed with ${response.status}.`);
+  const data = await response.json().catch(() => ({})) as T & { error?: string; message?: string; code?: string };
+  // Fastify's own errors put the reason in message and only "Bad Request" in error.
+  if (!response.ok) throw new Error((data.code ? data.message : data.error) ?? data.error ?? `Voice server request failed with ${response.status}.`);
   return data;
 }
 

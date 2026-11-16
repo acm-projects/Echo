@@ -41,10 +41,12 @@ export type NarratorState = {
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${VOICE_SERVER_URL}${path}`, {
     ...init,
-    headers: { 'content-type': 'application/json', ...await voiceServerHeaders(), ...init?.headers },
+    // JSON content-type only with a body: the server rejects an empty body that claims to be JSON (a DELETE has none).
+    headers: { ...(init?.body ? { 'content-type': 'application/json' } : {}), ...await voiceServerHeaders(), ...init?.headers },
   });
-  const data = await response.json() as T & { error?: string };
-  if (!response.ok) throw new Error(data.error ?? `Voice server request failed with ${response.status}.`);
+  const data = await response.json().catch(() => ({})) as T & { error?: string; message?: string; code?: string };
+  // Fastify's own errors put the reason in message and only "Bad Request" in error.
+  if (!response.ok) throw new Error((data.code ? data.message : data.error) ?? data.error ?? `Voice server request failed with ${response.status}.`);
   return data;
 }
 
