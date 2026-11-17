@@ -248,7 +248,7 @@ export default function LibraryScreen() {
 
           <Reveal>
             <SectionHead
-              title="Recommended for You"
+              title="Ready to Listen Titles"
               subtitle="Timeless stories worth discovering"
             />
 
