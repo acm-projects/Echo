@@ -51,6 +51,7 @@ export type RoomPost = {
   id: string;
   userId: string;
   author: string;
+  avatarPath: string | null;
   mine: boolean;
   // 0-based chapter the post is about, or null for a general post.
   chapterIndex: number | null;
@@ -60,7 +61,7 @@ export type RoomPost = {
   createdAt: string;
 };
 
-export type Member = { id: string; name: string; username: string; owner: boolean; me: boolean };
+export type Member = { id: string; name: string; username: string; avatarPath: string | null; owner: boolean; me: boolean };
 
 export type Activity =
   | { kind: 'listened'; userId: string; name: string; date: string; seconds: number; chapters: number }
@@ -174,12 +175,13 @@ export async function getRoomMembers(roomId: string): Promise<Member[]> {
   const { data, error } = await supabase.from('room_members').select('user_id, role, joined_at').eq('room_id', roomId).order('joined_at', { ascending: true }).limit(500);
   if (error) throw error;
   const ids = (data ?? []).map((m) => m.user_id);
-  const { data: people } = ids.length ? await supabase.from('users').select('id, username, display_name').in('id', ids) : { data: [] };
+  const { data: people } = ids.length ? await supabase.from('users').select('id, username, display_name, avatar_url').in('id', ids) : { data: [] };
   const byId = new Map((people ?? []).map((p) => [p.id, p]));
   return (data ?? []).map((m) => ({
     id: m.user_id,
     name: m.user_id === userId ? 'You' : displayName(byId.get(m.user_id)),
     username: byId.get(m.user_id)?.username ?? '',
+    avatarPath: byId.get(m.user_id)?.avatar_url ?? null,
     owner: m.role === 'owner',
     me: m.user_id === userId,
   }));
@@ -197,12 +199,13 @@ export async function getRoomPosts(roomId: string): Promise<RoomPost[]> {
     .limit(200);
   if (error) throw error;
   const ids = [...new Set((data ?? []).map((p) => p.user_id).filter(Boolean) as string[])];
-  const { data: people } = ids.length ? await supabase.from('users').select('id, username, display_name').in('id', ids) : { data: [] };
+  const { data: people } = ids.length ? await supabase.from('users').select('id, username, display_name, avatar_url').in('id', ids) : { data: [] };
   const byId = new Map((people ?? []).map((p) => [p.id, p]));
   return (data ?? []).map((p) => ({
     id: p.id!,
     userId: p.user_id!,
     author: p.user_id === userId ? 'You' : displayName(byId.get(p.user_id!)),
+    avatarPath: byId.get(p.user_id!)?.avatar_url ?? null,
     mine: p.user_id === userId,
     chapterIndex: p.chapter_index,
     spoiler: Boolean(p.is_spoiler),

@@ -68,6 +68,11 @@ export default function Player() {
   const now = useNowPlaying();
   const [settings, update] = useSettings();
   const [menu, setMenu] = useState(false);
+  const [chapterSheet, setChapterSheet] = useState(false);
+  const chapters = playback.chapters();
+  const index = chapters.findIndex((c) => c.chapterNumber === now.chapterNumber);
+  const hasNext = index >= 0 && index < chapters.length - 1;
+  const hasPrevious = index > 0;
   const [barWidth, setBarWidth] = useState(1);
   const remaining = now.durationSec - now.positionSec;
 
@@ -161,6 +166,9 @@ export default function Player() {
         </View>
 
         <View style={s.controls}>
+          <Pressable style={[s.chapterStep, !chapters.length && s.off]} onPress={playback.previousChapter} disabled={!chapters.length} accessibilityRole="button" accessibilityLabel={hasPrevious ? 'Previous chapter' : 'Start of chapter'}>
+            <Ionicons name="play-skip-back" size={20} color="#fff" />
+          </Pressable>
           <Pressable style={s.skip} onPress={() => playback.skip(-settings.skipSeconds)} accessibilityLabel={`Back ${settings.skipSeconds} seconds`}>
             <Ionicons name="refresh" size={24} color="#fff" style={{ transform: [{ scaleX: -1 }] }} />
             <Text style={s.skipText}>{settings.skipSeconds}</Text>
@@ -174,6 +182,9 @@ export default function Player() {
             <Ionicons name="refresh" size={24} color="#fff" />
             <Text style={s.skipText}>{settings.skipSeconds}</Text>
           </Pressable>
+          <Pressable style={[s.chapterStep, !hasNext && s.off]} onPress={playback.nextChapter} disabled={!hasNext} accessibilityRole="button" accessibilityLabel="Next chapter" accessibilityState={{ disabled: !hasNext }}>
+            <Ionicons name="play-skip-forward" size={20} color="#fff" />
+          </Pressable>
         </View>
 
           <View style={s.extras}>
@@ -184,6 +195,12 @@ export default function Player() {
               <Ionicons name={sleepLeft !== null ? 'moon' : 'moon-outline'} size={14} color={sleepLeft !== null ? '#14102A' : colors.text} />
               <Text style={[s.pillText, sleepLeft !== null && s.countdownText]}>{sleepLeft !== null ? formatCountdown(sleepLeft) : 'Sleep'}</Text>
             </Pressable>
+            {chapters.length > 1 && (
+              <Pressable onPress={() => setChapterSheet(true)} style={s.pill} accessibilityRole="button" accessibilityLabel="Chapters">
+                <Ionicons name="list-outline" size={14} color={colors.text} />
+                <Text style={s.pillText}>Chapters</Text>
+              </Pressable>
+            )}
             <Pressable onPress={() => router.push({ pathname: '/Test/book_details', params: { id: now.bookId, title: now.title, author: now.author } })} style={s.pill} accessibilityRole="button">
               <Ionicons name="people-outline" size={14} color={colors.text} />
               <Text style={s.pillText}>Cast</Text>
@@ -203,6 +220,21 @@ export default function Player() {
         <SheetItem icon="moon-outline" label="Sleep timer" detail={sleepLeft !== null ? `${formatCountdown(sleepLeft)} left` : 'Off'} onPress={openSleepFromMenu} />
         <SheetItem icon="book-outline" label="Book details & cast" onPress={() => { setMenu(false); router.push({ pathname: '/Test/book_details', params: { id: now.bookId, title: now.title, author: now.author } }); }} />
         <SheetItem icon="options-outline" label="Playback settings" detail="Speed, skip, autoplay" onPress={() => { setMenu(false); router.push('/Test/playback-settings'); }} />
+      </Sheet>
+
+      <Sheet visible={chapterSheet} onClose={() => setChapterSheet(false)} title="Chapters">
+        {chapters.map((c) => {
+          const current = c.chapterNumber === now.chapterNumber;
+          return (
+            <SheetItem
+              key={c.chapterId ?? c.chapterNumber}
+              icon={current ? 'volume-high' : 'play-circle-outline'}
+              label={`${c.chapterNumber}. ${c.chapter}`}
+              detail={current ? 'Playing' : c.durationSec ? formatTime(c.durationSec) : undefined}
+              onPress={() => { setChapterSheet(false); playback.playChapter(c.chapterNumber); }}
+            />
+          );
+        })}
       </Sheet>
 
       <Sheet visible={sleepSheet} onClose={() => setSleepSheet(false)} title="Sleep timer">
@@ -259,7 +291,9 @@ const s = StyleSheet.create({
   skip: { width: 58, height: 58, borderRadius: 29, backgroundColor: 'rgba(98,230,240,0.14)', borderWidth: 1, borderColor: 'rgba(98,230,240,0.4)', alignItems: 'center', justifyContent: 'center' },
   skipText: { position: 'absolute', fontFamily: fonts.sansBold, fontSize: 9, color: '#fff' },
   play: { width: 84, height: 84, borderRadius: 42, alignItems: 'center', justifyContent: 'center', backgroundColor: neon.accent },
-  extras: { flexDirection: 'row', justifyContent: 'center', gap: 10, marginTop: 22 },
+  extras: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 10, marginTop: 22 },
+  chapterStep: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border },
+  off: { opacity: 0.35 },
   pill: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 14, height: 34, borderRadius: 17, backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border },
   pillOn: { backgroundColor: neon.accent, borderColor: neon.accent },
   pillText: { fontFamily: fonts.sansBold, fontSize: 13, color: colors.text },

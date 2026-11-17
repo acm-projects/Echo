@@ -261,3 +261,59 @@ export async function setBookCover(bookId: string, coverPath: string) {
       .eq('id', bookId)
   );
 }
+
+/** The profile picture's stored path; returns the one it replaced, so its file can be removed. */
+export async function setUserAvatar(userId: string, avatarPath: string | null) {
+  if (!db) return undefined;
+  const { data } = await db.from('users').select('avatar_url').eq('id', userId).maybeSingle();
+  await run('setUserAvatar', db.from('users').update({ avatar_url: avatarPath }).eq('id', userId));
+  return data?.avatar_url ?? undefined;
+}
+
+export type ProfileView = {
+  id: string; username: string; displayName: string | null; avatarUrl: string | null; bio: string | null;
+  // Withheld (null) when the profile is private, or friends-only and the viewer isn't a friend.
+  stats: { books: number; listenSeconds: number; streak: number } | null;
+  sharedRooms: Array<{ id: string; name: string; bookTitle: string }>;
+  mutualFriends: Array<{ id: string; username: string; displayName: string | null; avatarUrl: string | null }>;
+};
+
+/**
+ * Another reader's profile as `viewerId` may see it. Stats follow the person's profile_visibility. Shared rooms are
+ * ones both belong to, and mutual friends are people the viewer is already friends with, so neither reveals anything
+ * the viewer couldn't see. Undefined when the person doesn't exist or either has blocked the other.
+ */
+export async function getProfileFor(viewerId: string, userId: string): Promise<ProfileView | undefined> {
+  if (!db) return undefined;
+  const { data: user } = await db.from('users').select('id, username, display_name, avatar_url, bio, profile_visibility').eq('id', userId).maybeSingle();
+  if (!user) return undefined;
+  const { data: links } = await db.from('friendships').select('requester_id, addressee_id, status').or(`requester_id.in.(${viewerId},${userId}),addressee_id.in.(${viewerId},${userId})`);
+  const other = (row: { requester_id: string; addressee_id: string }, me: string) => (row.requester_id === me ? row.addressee_id : row.requester_id);
+  const between = (links ?? []).find((row) => [row.requester_id, row.addressee_id].includes(viewerId) && [row.requester_id, row.addressee_id].includes(userId));
+  if (between?.status === 'blocked') return undefined;
+  const friendsOf = (id: string) => new Set((links ?? []).filter((row) => row.status === 'accepted' && (row.requester_id === id || row.addressee_id === id)).map((row) => other(row, id)));
+  const isFriend = between?.status === 'accepted';
+  const self = viewerId === userId;
+  const visible = self || user.profile_visibility === 'public' || (user.profile_visibility === 'friends_only' && isFriend);
+
+  const [books, streak, viewerRooms, theirRooms] = await Promise.all([
+    visible ? db.from('books').select('id', { count: 'exact', head: true }).eq('user_id', userId).is('deleted_at', null) : Promise.resolve({ count: 0 }),
+    visible ? db.from('user_streaks_live').select('live_streak, current_streak, total_listen_seconds').eq('user_id', userId).maybeSingle() : Promise.resolve({ data: null }),
+    db.from('room_members').select('room_id').eq('user_id', viewerId),
+    db.from('room_members').select('room_id').eq('user_id', userId),
+  ]);
+  const mine = new Set((viewerRooms.data ?? []).map((row) => row.room_id));
+  const sharedIds = (theirRooms.data ?? []).map((row) => row.room_id).filter((id) => self || mine.has(id));
+  const { data: rooms } = sharedIds.length ? await db.from('book_rooms').select('id, name, book_title').in('id', sharedIds) : { data: [] };
+
+  const theirFriends = friendsOf(userId);
+  const mutualIds = self ? [] : [...friendsOf(viewerId)].filter((id) => theirFriends.has(id));
+  const { data: people } = mutualIds.length ? await db.from('users').select('id, username, display_name, avatar_url').in('id', mutualIds) : { data: [] };
+
+  return {
+    id: user.id, username: user.username, displayName: user.display_name, avatarUrl: user.avatar_url, bio: visible ? user.bio : null,
+    stats: visible ? { books: books.count ?? 0, listenSeconds: Number(streak.data?.total_listen_seconds ?? 0), streak: Number(streak.data?.live_streak ?? streak.data?.current_streak ?? 0) } : null,
+    sharedRooms: (rooms ?? []).map((room) => ({ id: room.id, name: room.name, bookTitle: room.book_title })),
+    mutualFriends: (people ?? []).map((p) => ({ id: p.id, username: p.username, displayName: p.display_name, avatarUrl: p.avatar_url })),
+  };
+}

@@ -226,7 +226,7 @@ export const playback = {
   // Switch to a book/chapter and start playing; keeps the position when it's the same chapter.
   load: async (book: LoadInput) => {
     const { queue: chapters, durationSec, startAtSec, ...rest } = book;
-    queue = chapters ?? [];
+    queue = [...(chapters ?? [])].sort((a, b) => a.chapterNumber - b.chapterNumber);
     const token = ++loadToken;
     if (!book.audioPath) {
       if (state.audioPath) {
@@ -256,6 +256,8 @@ export const playback = {
       rateNeedsApply = true;
     }
     applyRate(p, state.speed);
+    // Paused (mini player, lock screen) while the chapter was still loading: keep it loaded but paused.
+    if (!state.isPlaying) return;
     p.play();
     showOnLockScreen();
   },
@@ -277,6 +279,24 @@ export const playback = {
     const position = Math.max(0, Math.min(1, fraction)) * state.durationSec;
     if (state.audioPath) player?.seekTo(position).catch(() => {});
     set({ positionSec: position });
+  },
+  // The book's playable chapters in order (empty for a test book, whose chapters have no audio).
+  chapters: () => queue,
+  // Jumps to a chapter of the book that's playing and plays it from the start.
+  playChapter: (chapterNumber: number) => {
+    const item = queue.find((c) => c.chapterNumber === chapterNumber);
+    if (!item || item.chapterNumber === state.chapterNumber) return;
+    void playback.load({ title: state.title, author: state.author, bookId: state.bookId, ...item, queue });
+  },
+  nextChapter: () => {
+    const upcoming = queue.find((c) => c.chapterNumber > state.chapterNumber);
+    if (upcoming) playback.playChapter(upcoming.chapterNumber);
+  },
+  // Like a music player: a few seconds in, back goes to the start of this chapter; at the start, to the one before.
+  previousChapter: () => {
+    const before = [...queue].reverse().find((c) => c.chapterNumber < state.chapterNumber);
+    if (state.positionSec > 5 || !before) return playback.seek(0);
+    playback.playChapter(before.chapterNumber);
   },
   setSpeed: (speed: number) => {
     if (state.audioPath && player) applyRate(player, speed);
