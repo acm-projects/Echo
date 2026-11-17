@@ -1,5 +1,5 @@
-import { useCallback, useState } from 'react';
-import { ActivityIndicator, KeyboardAvoidingView, Platform, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View } from 'react-native';
+import { useCallback, useRef, useState } from 'react';
+import { ActivityIndicator, AppState, KeyboardAvoidingView, Platform, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View } from 'react-native';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { Screen } from '../../components/Screen';
@@ -12,9 +12,12 @@ import { Avatar } from '../../components/Avatar';
 import { colors, fonts, type } from '../../../theme';
 import { confirm, notify } from '../../../lib/notify';
 import {
-  NotSignedIn, addRoomPost, ago, deleteRoom, deleteRoomPost, getFriendStates, getRoom, getRoomMembers, getRoomPosts, joinRoom, leaveRoom, requestFriend, roomColor,
+  NotSignedIn, addRoomPost, ago, deleteRoom, deleteRoomPost, getFriendStates, getRoom, getRoomMembers, getRoomPosts, joinRoom, leaveRoom, requestFriend, roomColor, watchRoom,
   type FriendState, type Member, type Room as RoomInfo, type RoomPost,
 } from '../../data/community';
+
+// Backup refresh while a room is open, in case a live ping was missed.
+const POLL_MS = 30_000;
 
 type Loaded = { room: RoomInfo | null; posts: RoomPost[]; members: Member[]; friends: Map<string, FriendState> };
 
@@ -40,43 +43,54 @@ export default function Room() {
     );
     return () => { active = false; };
   }, [id]);
-  // Auto-refresh posts every 4 seconds
+  // Live posts. Others' new or deleted posts arrive as a broadcast ping, and the posts are re-fetched once per burst
+  // (debounced). A slow poll covers a missed ping. Both stop when the room isn't on screen or the app is in the
+  // background, so an idle room costs nothing.
+  const watch = useRef<ReturnType<typeof watchRoom> | null>(null);
   useFocusEffect(
-  useCallback(() => {
-    let active = true;
-    let refreshing = false;
+    useCallback(() => {
+      if (!id) return;
+      let active = true;
+      let refreshing = false;
+      let again = false;
+      let debounce: ReturnType<typeof setTimeout> | null = null;
+      const stopLoad = load();
 
-    load();
-
-    const refreshPosts = async () => {
-      if (!active || refreshing || !id) return;
-
-      refreshing = true;
-
-      try {
-        const posts = await getRoomPosts(id);
-
-        if (active) {
-          setData((current) =>
-            current ? { ...current, posts } : current
-          );
+      const refreshPosts = async () => {
+        if (!active || AppState.currentState !== 'active') return;
+        if (refreshing) { again = true; return; }
+        refreshing = true;
+        try {
+          const posts = await getRoomPosts(id);
+          if (active) setData((current) => (current ? { ...current, posts } : current));
+        } catch {
+          // Kept as is; the next ping or poll tries again.
+        } finally {
+          refreshing = false;
+          if (again && active) { again = false; void refreshPosts(); }
         }
-      } catch {
-      } finally {
-        refreshing = false;
-      }
-    };
+      };
+      const soon = () => {
+        if (debounce) clearTimeout(debounce);
+        debounce = setTimeout(() => void refreshPosts(), 400);
+      };
 
-    const interval = setInterval(() => {
-      void refreshPosts();
-    }, 4000);
+      watch.current = watchRoom(id, soon);
+      const poll = setInterval(() => void refreshPosts(), POLL_MS);
+      // Coming back to the app catches up straight away.
+      const appState = AppState.addEventListener('change', (state) => { if (state === 'active') soon(); });
 
-    return () => {
-      active = false;
-      clearInterval(interval);
-    };
-  }, [id, load])
-);
+      return () => {
+        active = false;
+        stopLoad();
+        if (debounce) clearTimeout(debounce);
+        clearInterval(poll);
+        appState.remove();
+        watch.current?.stop();
+        watch.current = null;
+      };
+    }, [id, load])
+  );
 
   const room = data?.room ?? null;
   const title = room?.name ?? params.title ?? 'Book room';
@@ -106,12 +120,14 @@ export default function Room() {
       setSpoiler(false);
       const posts = await getRoomPosts(id);
       setData((d) => d && { ...d, posts });
+      watch.current?.changed();
     });
   };
 
   const remove = (p: RoomPost) => run('Couldn’t delete the post', async () => {
     await deleteRoomPost(p.id);
     setData((d) => d && { ...d, posts: d.posts.filter((item) => item.id !== p.id) });
+    watch.current?.changed();
   });
 
   const join = () => run('Couldn’t join', async () => { await joinRoom(id); load(); });

@@ -1,4 +1,5 @@
 import { signedInClient } from './supabaseRows';
+import { supabase as sharedClient } from '../../lib/supabase';
 import { getFriendActivity, getMyFriendships, sendFriendRequest } from '../../lib/db/friends';
 
 // The Community tab, from Supabase. Readers make book rooms about any book (book_rooms + room_members):
@@ -228,6 +229,20 @@ export async function deleteRoomPost(postId: string) {
   const { supabase } = await client();
   const { error } = await supabase.from('room_posts').update({ deleted_at: new Date().toISOString() }).eq('id', postId);
   if (error) throw error;
+}
+
+/**
+ * Live updates for an open room without database load: a Realtime Broadcast channel per room carries a bare "posts
+ * changed" ping (no post content, so spoiler masking still happens when each reader re-fetches through
+ * room_posts_visible). `changed` sends the ping after you post or delete; `stop` closes the channel.
+ */
+export function watchRoom(roomId: string, onPing: () => void) {
+  const channel = sharedClient.channel(`room-posts:${roomId}`, { config: { broadcast: { self: false } } });
+  channel.on('broadcast', { event: 'posts' }, () => onPing()).subscribe();
+  return {
+    changed: () => { void channel.send({ type: 'broadcast', event: 'posts', payload: {} }).catch(() => {}); },
+    stop: () => { void sharedClient.removeChannel(channel); },
+  };
 }
 
 // ---- Friends, as the community screens need them ------------------------------------------------------------------

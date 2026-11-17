@@ -64,6 +64,59 @@ function Cover({ title, author, playing }: { title: string; author: string; play
   );
 }
 
+// The progress bar, draggable. While a finger (or mouse) is down the bar and times follow it and the audio keeps
+// playing where it was; letting go seeks there once, so dragging doesn't fire a seek per pixel. A tap seeks too.
+function Scrubber({ positionSec, durationSec }: { positionSec: number; durationSec: number }) {
+  const [width, setWidth] = useState(1);
+  const [drag, setDrag] = useState<number | null>(null);
+  // The bar's left edge on screen, taken when the touch starts: pageX keeps working when the finger drifts off the
+  // bar, where locationX would jump to whatever view is under it.
+  const origin = useRef(0);
+  const fractionAt = (pageX: number) => Math.max(0, Math.min(1, (pageX - origin.current) / width));
+  const playing = durationSec > 0 ? positionSec / durationSec : 0;
+  const shown = drag ?? playing;
+  const shownSec = drag !== null ? drag * durationSec : positionSec;
+  const step = durationSec > 0 ? Math.min(0.05, 15 / durationSec) : 0.05;
+  const finish = () => {
+    if (drag !== null) playback.seek(drag);
+    setDrag(null);
+  };
+  return (
+    <>
+      <View
+        style={s.scrub}
+        onLayout={(e) => setWidth(Math.max(1, e.nativeEvent.layout.width))}
+        onStartShouldSetResponder={() => durationSec > 0}
+        onMoveShouldSetResponder={() => durationSec > 0}
+        // Keeps the ScrollView from taking over a sideways drag.
+        onResponderTerminationRequest={() => false}
+        onResponderGrant={(e) => {
+          origin.current = e.nativeEvent.pageX - e.nativeEvent.locationX;
+          setDrag(fractionAt(e.nativeEvent.pageX));
+        }}
+        onResponderMove={(e) => setDrag(fractionAt(e.nativeEvent.pageX))}
+        onResponderRelease={finish}
+        onResponderTerminate={finish}
+        accessible
+        accessibilityRole="adjustable"
+        accessibilityLabel="Seek"
+        accessibilityValue={{ min: 0, max: Math.round(durationSec), now: Math.round(shownSec), text: `${formatTime(shownSec)} of ${formatTime(durationSec)}` }}
+        accessibilityActions={[{ name: 'increment' }, { name: 'decrement' }]}
+        onAccessibilityAction={(e) => playback.seek(playing + (e.nativeEvent.actionName === 'increment' ? step : -step))}
+      >
+        <View pointerEvents="none">
+          <ProgressBar value={shown} height={drag !== null ? 7 : 5} />
+        </View>
+        <View pointerEvents="none" style={[s.thumb, drag !== null && s.thumbActive, { left: `${shown * 100}%` }]} />
+      </View>
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+        <Text style={[type.meta, drag !== null && { color: colors.text }]}>{formatTime(shownSec)}</Text>
+        <Text style={type.meta}>-{formatTime(Math.max(0, durationSec - shownSec))}</Text>
+      </View>
+    </>
+  );
+}
+
 export default function Player() {
   const now = useNowPlaying();
   const [settings, update] = useSettings();
@@ -73,8 +126,6 @@ export default function Player() {
   const index = chapters.findIndex((c) => c.chapterNumber === now.chapterNumber);
   const hasNext = index >= 0 && index < chapters.length - 1;
   const hasPrevious = index > 0;
-  const [barWidth, setBarWidth] = useState(1);
-  const remaining = now.durationSec - now.positionSec;
 
   useEffect(() => {
     // Start each session at the listener's preferred speed.
@@ -151,19 +202,7 @@ export default function Player() {
           {now.error && <Text style={[type.meta, { color: colors.danger, textAlign: 'center' }]}>{now.error}</Text>}
         </View>
 
-        <Pressable
-          style={{ marginTop: 24, paddingVertical: 8 }}
-          onLayout={(e) => setBarWidth(e.nativeEvent.layout.width)}
-          onPress={(e) => playback.seek(e.nativeEvent.locationX / barWidth)}
-          accessibilityRole="adjustable"
-          accessibilityLabel="Seek"
-        >
-          <ProgressBar value={now.durationSec > 0 ? now.positionSec / now.durationSec : 0} height={5} />
-        </Pressable>
-        <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-          <Text style={type.meta}>{formatTime(now.positionSec)}</Text>
-          <Text style={type.meta}>-{formatTime(remaining)}</Text>
-        </View>
+        <Scrubber positionSec={now.positionSec} durationSec={now.durationSec} />
 
         <View style={s.controls}>
           <Pressable style={[s.chapterStep, !chapters.length && s.off]} onPress={playback.previousChapter} disabled={!chapters.length} accessibilityRole="button" accessibilityLabel={hasPrevious ? 'Previous chapter' : 'Start of chapter'}>
@@ -291,6 +330,9 @@ const s = StyleSheet.create({
   skip: { width: 58, height: 58, borderRadius: 29, backgroundColor: 'rgba(98,230,240,0.14)', borderWidth: 1, borderColor: 'rgba(98,230,240,0.4)', alignItems: 'center', justifyContent: 'center' },
   skipText: { position: 'absolute', fontFamily: fonts.sansBold, fontSize: 9, color: '#fff' },
   play: { width: 84, height: 84, borderRadius: 42, alignItems: 'center', justifyContent: 'center', backgroundColor: neon.accent },
+  scrub: { marginTop: 24, height: 32, justifyContent: 'center' },
+  thumb: { position: 'absolute', top: 9, width: 14, height: 14, marginLeft: -7, borderRadius: 7, backgroundColor: colors.pink },
+  thumbActive: { top: 6, width: 20, height: 20, marginLeft: -10, borderRadius: 10 },
   extras: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 10, marginTop: 22 },
   chapterStep: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border },
   off: { opacity: 0.35 },
