@@ -206,7 +206,7 @@ const s = StyleSheet.create({
   chipOn: { backgroundColor: accent, borderColor: accent },
   chipText: { fontFamily: fonts.sansBold, fontSize: 13, color: colors.text },
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 14 },
-  ribbon: { position: 'absolute', top: 0, right: 12, width: 7, backgroundColor: colors.gold },
+  ribbon: { position: 'absolute', top: 0, right: 18, width: 9, backgroundColor: colors.gold },
   gridTitle: { fontFamily: fonts.serif, fontSize: 15, color: '#FFFFFF', marginTop: 8 },
   gridMeta: { fontFamily: fonts.sansMd, fontSize: 12, color: colors.dim, marginTop: 2 },
   empty: { alignItems: 'center', gap: 6, paddingVertical: 34 },

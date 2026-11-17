@@ -106,7 +106,6 @@ export function BookCover({
         </View>
 
         <View pointerEvents="none" style={styles.bookSpine} />
-        <View pointerEvents="none" style={styles.bookmark} />
       </View>
     );
   }
