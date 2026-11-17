@@ -13,7 +13,7 @@ import { z } from 'zod';
 import Anthropic from '@anthropic-ai/sdk';
 import { zodOutputFormat } from '@anthropic-ai/sdk/helpers/zod';
 import { chunkText, extractBook, gutenbergBook, wordCount, type ExtractedBook } from './book-text.js';
-import { clearLocalCopies, deleteKeys, deletePrefix, dropLocalCopies, initStorage, listKeys, localCopy, playbackSource, putBytes, putBytesKeepingLocal, putFile, readText, storageMode } from './storage.js';
+import { clearLocalCopies, copyKey, deleteKeys, deletePrefix, dropLocalCopies, initStorage, listKeys, localCopy, playbackSource, putBytes, putBytesKeepingLocal, putFile, readText, storageMode } from './storage.js';
 import { dbMode, deleteNarratorVoice, failInterruptedBooks, resetChapterAudio, getBookOwner, getStaleBookIds, getNarratorVoices, getVoiceUsage, initDb, setBookCast, setBookChapters, setBookDeleted, setBookFailed, setBookProcessing, setBookQueued, setBookReady, setBookSource, setChapterAudio, setChapterStatus, setCharacterVoice, setNarratorSample, setNarratorVoice, setSelectedNarrator, touchBook, userFromAuthorization, setBookCover, setUserAvatar, getProfileFor } from './db.js';
 import { generatePdfCover } from './book-cover.js';
 import { randomUUID as coverUUID } from 'node:crypto';
@@ -881,6 +881,8 @@ type BookJob = {
   cast?: CastEntry[];
   result?: unknown;
   error?: string;
+  // How often the app should poll; set only for demo copies, whose stages are a fraction of a second apart.
+  pollMs?: number;
 };
 // Book processing takes minutes, longer than mobile HTTP idle timeouts (iOS NSURLRequest defaults to 60s)
 // and longer than an app may stay foregrounded, so clients start a job and poll its status instead.
@@ -943,6 +945,8 @@ type JobState = {
   designedVoices?: Record<string, VoiceRef>;
   segments: Record<string, Segment[]>;
   narrated: Record<string, { audioKey: string; durationMs: number; timeline: TimelineEntry[]; segments: unknown[] }>;
+  // Set on a presentation-demo copy (see runDemoBook): the book whose finished cast and audio it was copied from.
+  demoOf?: string;
 };
 
 // Books narrating on this server (with their state, so cleanup can see which voices they still use), and books
@@ -992,6 +996,7 @@ function publishJob(state: JobState, patch: Partial<BookJob> = {}) {
     awaitingCast: awaitingCast(state),
     cast: state.castReady ? castOf(state) : undefined,
     error: state.error,
+    pollMs: state.demoOf ? 300 : undefined,
     ...patch,
   });
 }
@@ -1067,16 +1072,20 @@ function startBook(input: { who: Requester; fileName: string; buffer: Buffer; bo
     // With one voice there's nothing to review.
     reviewCast: input.characterVoices,
   };
+  // Marked before the first publish, so the very first poll is already a fast one.
+  if (isDemoTitle(title)) state.demoOf = DEMO_BOOK_ID;
   publishJob(state, { stage: 'Queued' });
-  void runBook(state, input.buffer);
+  void (state.demoOf ? runDemoBook(state, input.buffer) : runBook(state, input.buffer));
   return jobId;
 }
 
 // Narrates every chapter that isn't ready yet, one at a time, so a reader can start on chapter 1 while the rest are
 // made. Each step is saved to the job state, so a retry, a restart or a new narrator picks up without redoing Claude's
 // work. With characterVoices off (the app's Character Voices switch), the narrator reads every line.
-async function runBook(state: JobState, sourceBuffer?: Buffer) {
+async function runBook(state: JobState, sourceBuffer?: Buffer): Promise<void> {
   const { jobId } = state;
+  // A demo copy is "narrated" again (retry, after Stop) by copying, never by generating.
+  if (state.demoOf) return runDemoBook(state, sourceBuffer);
   if (running.has(jobId)) return;
   running.set(jobId, state);
   waitingBooks.delete(jobId);
@@ -1397,6 +1406,161 @@ async function runBook(state: JobState, sourceBuffer?: Buffer) {
   }
 }
 
+// ---- Presentation demo -------------------------------------------------------------------------------------------
+// For live demos, where a real narration takes too long to show. An upload titled like the demo book (default "The
+// Night Ferry", matched ignoring case, punctuation, a leading "The", a download's " (1)" and the file extension) runs through every stage a
+// real book shows, Meet the cast included, but its voices and chapter audio are copied from a book that was already
+// narrated (ECHO_DEMO_BOOK_ID) instead of being made. The copy is the uploader's own book, so it plays, appears on
+// their shelf and deletes like any other. Cast changes are accepted and quietly kept as they were, since the audio
+// already exists. If the template can't be read, the upload is narrated for real.
+const DEMO_BOOK_ID = process.env.ECHO_DEMO_BOOK_ID?.trim() || 'af4a96ca-7202-449d-94bc-56329f395367';
+const titleKey = (title: string) => title.toLowerCase().replace(/\.(pdf|epub|txt|md)$/, '').replace(/\s*\(\d+\)$/, '').replace(/[^a-z0-9]+/g, ' ').trim().replace(/^the /, '');
+const DEMO_TITLE_KEY = titleKey(process.env.ECHO_DEMO_TITLE?.trim() || 'The Night Ferry');
+const isDemoTitle = (title: string) => titleKey(title) === DEMO_TITLE_KEY;
+// Short pauses between stages: fast, but each stage is on screen long enough to read.
+const DEMO_STAGE_MS = 650;
+const DEMO_LINE_MS = 280;
+const demoPause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function runDemoBook(state: JobState, sourceBuffer?: Buffer): Promise<void> {
+  const { jobId } = state;
+  if (running.has(jobId)) return;
+  const template = await loadJob(state.demoOf ?? DEMO_BOOK_ID).catch(() => undefined);
+  if (!template?.roster || !template.chapters.length || template.chapters.some((chapter) => !chapter.audioKey)) {
+    app.log.warn({ jobId, template: DEMO_BOOK_ID }, 'Demo template unavailable: narrating the upload for real');
+    state.demoOf = undefined;
+    return runBook(state, sourceBuffer);
+  }
+  state.demoOf = template.jobId;
+  running.set(jobId, state);
+  waitingBooks.delete(jobId);
+  let finishRun!: () => void;
+  runDone.set(jobId, new Promise<void>((resolve) => { finishRun = resolve; }));
+  const folder = bookFolder(jobId);
+  const multi = template.chapters.length > 1;
+  const setStage = (stage: string) => publishJob(state, { stage });
+  const check = () => {
+    if (cancelled.has(jobId)) throw new Error('The book was removed.');
+    if (stopping.has(jobId)) throw new Error('Narration was stopped.');
+  };
+  const save = async () => { if (!cancelled.has(jobId)) await putBytes(jobStateKey(jobId), JSON.stringify(state)); };
+  const record = async (what: string, write: () => Promise<unknown>) => {
+    if (!state.signedIn) return;
+    await write().catch((error: unknown) => app.log.warn({ error: error instanceof Error ? error.message : error, jobId }, `Supabase ${what} not recorded`));
+  };
+  try {
+    Object.assign(state, { status: 'processing', error: undefined, server: SERVER_NAME });
+    if (sourceBuffer) {
+      await putBytes(state.sourceKey, sourceBuffer);
+      await record('book', () => setBookSource({ id: jobId, userId: state.userId, title: state.title, author: state.author, sourcePath: state.sourceKey, sizeBytes: sourceBuffer.length }));
+      try {
+        const coverPath = await generatePdfCover(jobId, state.sourceKey, sourceBuffer);
+        if (coverPath) await record('cover', () => setBookCover(jobId, coverPath));
+      } catch (error) {
+        app.log.warn({ jobId, error }, 'Could not generate PDF cover');
+      }
+    } else {
+      await record('book', () => setBookProcessing(jobId));
+    }
+
+    if (!state.castReady) {
+      // The template's chapters and splits, so the text matches the audio that will be copied.
+      state.chapters = template.chapters.map(({ index, title, text, startOffset }) => ({ index, title, text, startOffset, status: 'queued' as const }));
+      Object.assign(state, { characterVoices: true, reviewCast: true, castApproved: false, voices: {}, designedVoices: {}, narrated: {} });
+      await save();
+      setStage('Reading the book with Claude');
+      await demoPause(DEMO_STAGE_MS * 2);
+      check();
+      state.roster = structuredClone(template.roster);
+      state.segments = structuredClone(template.segments);
+      setStage('Designing character voices');
+      // Each voice's recording is copied into this book, so its reader can play it: the template's narrator is in
+      // another reader's Voice Studio, which nobody else can open.
+      for (const [name, voice] of Object.entries(template.voices)) {
+        check();
+        const fileBase = name === 'Narrator' ? 'narrator' : (voice.voiceId ?? name).replace(/[^a-zA-Z0-9_-]/g, '_');
+        const key = `${folder}/voices/${fileBase}.wav`;
+        await copyKey(voice.samplePath, key);
+        state.voices[name] = name === 'Narrator'
+          ? { voiceId: voice.voiceId, referenceKey: key, samplePath: key, source: 'narrator', label: voice.label ?? 'Story narrator' }
+          : { voiceId: voice.voiceId, referenceKey: key, samplePath: key, source: 'designed' };
+        if (name !== 'Narrator') state.designedVoices![name] = state.voices[name];
+        await demoPause(DEMO_STAGE_MS);
+      }
+      const roster = state.roster;
+      await record('cast', () => setBookCast(jobId, roster.characters.map((character) => ({ ...character, voiceId: state.voices[character.name]?.voiceId, voiceSamplePath: state.voices[character.name]?.samplePath }))));
+      await record('chapters', () => setBookChapters(jobId, state.chapters.map(({ index, title, text }) => ({ index, title, wordCount: wordCount(text) }))));
+      state.castReady = true;
+      await save();
+    }
+
+    if (awaitingCast(state)) {
+      await save();
+      await record('book queued', () => setBookQueued(jobId));
+      publishJob(state, { stage: 'Review the cast' });
+      waitingBooks.set(jobId, state);
+      return;
+    }
+
+    for (const chapter of state.chapters.filter((item) => item.status !== 'ready')) {
+      const source = template.chapters[chapter.index];
+      const stage = (what: string) => setStage(multi ? `Chapter ${chapter.index + 1} of ${state.chapters.length} · ${what}` : what);
+      check();
+      chapter.status = 'processing';
+      publishJob(state);
+      await record('chapter status', () => setChapterStatus(jobId, chapter.index, 'processing'));
+      stage('Splitting scenes');
+      await demoPause(DEMO_STAGE_MS);
+      const lines = Math.max(1, mergeSegments(state.segments[chapter.index] ?? []).length);
+      for (let line = 1; line <= lines; line += 1) {
+        check();
+        stage(`Narrating (${line}/${lines})`);
+        await demoPause(DEMO_LINE_MS);
+      }
+      stage('Mixing the audio');
+      await demoPause(DEMO_STAGE_MS / 2);
+      check();
+      stage('Saving the audio');
+      const audioKey = chapterAudioKey(jobId, chapter.index, state.chapters.length);
+      const sizeBytes = await copyKey(source.audioKey!, audioKey);
+      const durationMs = source.durationMs ?? 0;
+      await record('chapter', () => setChapterAudio(jobId, { index: chapter.index, title: chapter.title, audioPath: audioKey, durationMs, sizeBytes, wordCount: wordCount(chapter.text) }));
+      Object.assign(chapter, { status: 'ready', audioKey, durationMs, error: undefined });
+      state.narrated[chapter.index] = { audioKey, durationMs, timeline: template.narrated[chapter.index]?.timeline ?? [], segments: [] };
+      timelineCache.delete(`${jobId}:${chapter.index}`);
+      await save();
+      publishJob(state);
+    }
+    const durationMs = state.chapters.reduce((total, chapter) => total + (chapter.durationMs ?? 0), 0);
+    await record('book status', () => setBookReady(jobId, { chapters: state.chapters.length, durationMs, modelInfo: { roster: CLAUDE_MODEL, voices: GEMINI_MODEL, speech: 'IndexTTS2', characterVoices: 'on' } }));
+    state.status = 'done';
+    await save();
+    app.log.info({ jobId, template: state.demoOf }, 'Demo book ready');
+    // openBook: the upload screen goes straight to the book's page.
+    publishJob(state, { stage: 'Complete', result: { jobId, roster: state.roster, chapters: bookJobs.get(jobId)?.chapters, openBook: true } });
+  } catch (error) {
+    if (cancelled.has(jobId) || stopping.has(jobId)) return;
+    const message = error instanceof Error ? error.message : 'Book processing failed.';
+    app.log.error({ error, message, jobId }, 'Demo book failed');
+    for (const chapter of state.chapters) if (chapter.status === 'processing') Object.assign(chapter, { status: 'failed', error: message });
+    Object.assign(state, { status: 'error', error: message });
+    publishJob(state, { stage: 'Failed' });
+    await record('failure', () => setBookFailed(jobId, message));
+    await save().catch(() => {});
+  } finally {
+    running.delete(jobId);
+    const stopped = stopping.has(jobId) && !cancelled.has(jobId);
+    if (cancelled.has(jobId)) {
+      await deletePrefix(`${folder}/`).catch(() => {});
+      cancelled.delete(jobId);
+    }
+    stopping.delete(jobId);
+    if (stopped && state.status !== 'done') await returnToCast(state).catch((error: unknown) => app.log.error({ error, jobId }, 'Could not put the stopped book back at its cast'));
+    runDone.delete(jobId);
+    finishRun();
+  }
+}
+
 // After Stop: the narrated audio is deleted (chapter MP3s, the manifest, line audio), every chapter waits again, and
 // the book waits at its cast review. The source, the cast's voices and Claude's scene splits stay, so starting again
 // doesn't pay for them twice, and removing the book deletes everything.
@@ -1442,7 +1606,7 @@ app.post('/api/books/process', async (request, reply) => {
     // Sent as a form field ahead of the file; anything but "false" keeps character voices on.
     const characterVoices = readCharacterVoices(upload.fields);
     const jobId = startBook({ who: await requester(request), fileName: upload.filename, buffer, book, characterVoices });
-    return reply.code(202).send({ jobId, status: 'processing', stage: 'Queued' });
+    return reply.code(202).send({ jobId, status: 'processing', stage: 'Queued', pollMs: bookJobs.get(jobId)?.pollMs });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Book processing failed.';
     app.log.error({ error, message }, 'Book processing failed');
@@ -1493,7 +1657,7 @@ app.get('/api/books/jobs/:jobId', async (request, reply) => {
     }
   }
   if (!job || !isOwner({ userId: job.userId, account: job.account }, who)) return reply.code(404).send({ error: 'Book job not found.' });
-  return { jobId, status: job.status, stage: job.stage, updatedAt: job.updatedAt, chapters: job.chapters, awaitingCast: job.awaitingCast, cast: job.cast, result: job.result, error: job.error };
+  return { jobId, status: job.status, stage: job.stage, updatedAt: job.updatedAt, chapters: job.chapters, awaitingCast: job.awaitingCast, cast: job.cast, result: job.result, error: job.error, pollMs: job.pollMs };
 });
 
 // The cast and the voice each member is read with.
@@ -1520,6 +1684,17 @@ app.put('/api/books/:jobId/cast', async (request, reply) => {
   if (running.has(jobId)) return reply.code(409).send({ error: 'This book is being narrated. Wait for it to finish, then change its voices.' });
   if (!state.castReady) return reply.code(409).send({ error: 'The cast isn\u2019t ready yet.' });
   const input = castChangeSchema.parse(request.body);
+  if (state.demoOf) {
+    // A demo copy's audio already exists, so its voices stay as they are; approving starts the (copied) narration.
+    const waiting = awaitingCast(state);
+    if (waiting && input.start) {
+      state.castApproved = true;
+      await putBytes(jobStateKey(jobId), JSON.stringify(state));
+      publishJob(state, { stage: 'Queued', result: undefined });
+      void runDemoBook(state);
+    }
+    return { cast: castOf(state), awaitingCast: awaitingCast(state), narrating: waiting && input.start, changed: [] };
+  }
   const { voices: studio } = await myVoices(who);
   const changed = new Set<string>();
   for (const [name, choice] of Object.entries(input.voices)) {

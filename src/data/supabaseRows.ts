@@ -1,4 +1,5 @@
 import type { Book, Chapter, Character, CommunityBook, ReviewComment, UserProgress, UserStreak } from './types';
+import { tuckedBookIds } from './tucked';
 
 // Real rows from Supabase, read as the signed-in user (RLS decides what's visible). The data layer adds these
 // after the mock test data. With nobody signed in, outside the app (scripts have no session storage), or when a
@@ -36,10 +37,13 @@ async function rows<T>(what: string, query: PromiseLike<{ data: unknown; error: 
   return (data ?? []) as T[];
 }
 
-export async function supabaseMyBooks(): Promise<Book[]> {
+export async function supabaseMyBooks(options: { includeTucked?: boolean } = {}): Promise<Book[]> {
   const client = await signedInClient();
   if (!client) return [];
-  return rows<Book>('books', client.supabase.from('books').select(BOOK_COLUMNS).eq('user_id', client.userId).is('deleted_at', null).order('created_at', { ascending: false }));
+  const books = await rows<Book>('books', client.supabase.from('books').select(BOOK_COLUMNS).eq('user_id', client.userId).is('deleted_at', null).order('created_at', { ascending: false }));
+  if (options.includeTucked) return books;
+  const tucked = await tuckedBookIds(client.userId, books);
+  return tucked.size ? books.filter((book) => !tucked.has(book.id)) : books;
 }
 
 export async function supabaseBook(bookId: string): Promise<Book | null> {

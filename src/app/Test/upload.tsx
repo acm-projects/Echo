@@ -132,6 +132,10 @@ export default function Upload() {
         const chapters = update.chapters ?? [];
         if (chapters.length > 1) for (const chapter of chapters) if (chapter.status === 'ready') void notifyChapterReady(update.jobId, chapter.index, bookTitle(file.name), chapter.title);
       }, { characterVoices: settings.characterVoices });
+      if (finished.result?.openBook) {
+        router.push({ pathname: '/Test/book_details', params: { id: finished.jobId, title: bookTitle(file.name), author: 'Uploaded by you' } });
+        return;
+      }
       const chapters = finished.chapters ?? [];
       const voices = finished.result?.roster?.characters.length ?? 0;
       const summary = chapters.length > 1 ? `${chapters.filter((c) => c.status === 'ready').length} of ${chapters.length} chapters narrated` : 'Narration finished';

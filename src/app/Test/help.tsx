@@ -1,10 +1,13 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { LayoutAnimation, Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Screen } from '../../components/Screen';
 import { PageHeader } from '../../components/PageHeader';
 import { GradientButton } from '../../components/GradientButton';
 import { colors, fonts, type } from '../../../theme';
+import { toggleTucked } from '../../data/tucked';
+import { supabaseMyBooks } from '../../data/supabaseRows';
+import { supabase } from '../../../lib/supabase';
 
 // Set to the team's real support inbox; the contact card stays hidden until then.
 const SUPPORT_EMAIL = '';
@@ -16,8 +19,26 @@ const FAQ = [
   { q: 'Can I change the narrator’s voice?', a: 'Yes. Open Settings → Voices → Narrator voice to pick one or describe a new voice in your own words.' },
 ];
 
+// Flips the hidden demo switch for whoever is signed in, against every book on the account (hidden ones included).
+async function flipTucked() {
+  const { data } = await supabase.auth.getSession();
+  const userId = data.session?.user.id;
+  if (!userId) return;
+  await toggleTucked(userId, await supabaseMyBooks({ includeTucked: true }));
+}
+
 export default function Help() {
   const [open, setOpen] = useState<number | null>(0);
+  // Five quick taps on the intro line flip the hidden demo switch (see data/tucked.ts). Taps, not a long press, so the
+  // phone never offers to look up or select the words.
+  const taps = useRef<number[]>([]);
+  const secretTap = () => {
+    const now = Date.now();
+    taps.current = [...taps.current.filter((at) => now - at < 2000), now];
+    if (taps.current.length < 5) return;
+    taps.current = [];
+    void flipTucked().catch(() => {});
+  };
   const toggle = (i: number) => {
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
     setOpen(open === i ? null : i);
@@ -27,7 +48,9 @@ export default function Help() {
     <Screen interior="radioroom">
       <PageHeader title="Help & support" fallback="/Test/profile" />
       <ScrollView contentContainerStyle={s.page} showsVerticalScrollIndicator={false}>
-        <Text style={s.intro}>Questions from fellow night listeners.</Text>
+        <Pressable onPress={secretTap} accessible={false} style={s.noSelect}>
+          <Text style={[s.intro, s.noSelect]} selectable={false}>Questions from fellow night listeners.</Text>
+        </Pressable>
         <View style={s.card}>
           {FAQ.map((item, i) => (
             <Pressable key={item.q} onPress={() => toggle(i)} style={[s.item, i < FAQ.length - 1 && s.line]} accessibilityRole="button" accessibilityState={{ expanded: open === i }}>
@@ -52,6 +75,8 @@ export default function Help() {
 
 const s = StyleSheet.create({
   page: { paddingHorizontal: 20, paddingBottom: 200 },
+  // Web: no word selection or iOS callout on repeated taps.
+  noSelect: { userSelect: 'none', WebkitUserSelect: 'none', WebkitTouchCallout: 'none' } as object,
   intro: { fontFamily: fonts.serifItalic, fontSize: 16, color: colors.dim, marginBottom: 16, marginLeft: 4 },
   card: { borderRadius: 12, backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border, paddingHorizontal: 18 },
   item: { paddingVertical: 17 },

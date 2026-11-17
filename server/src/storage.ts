@@ -1,4 +1,4 @@
-import { DeleteObjectsCommand, GetObjectCommand, ListObjectsV2Command, NoSuchKey, PutObjectCommand, S3Client, paginateListObjectsV2 } from '@aws-sdk/client-s3';
+import { CopyObjectCommand, DeleteObjectsCommand, GetObjectCommand, HeadObjectCommand, ListObjectsV2Command, NoSuchKey, PutObjectCommand, S3Client, paginateListObjectsV2 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { copyFile, mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { createReadStream, createWriteStream } from 'node:fs';
@@ -164,6 +164,19 @@ export async function listKeys(prefix: string) {
     for (const item of page.Contents ?? []) keys.push({ key: item.Key!, modified: item.LastModified?.getTime() ?? 0 });
   }
   return keys;
+}
+
+/** Copies a stored object to a new key (server side in S3, nothing downloaded). Returns the copy's size in bytes. */
+export async function copyKey(from: string, to: string) {
+  if (!s3) {
+    await mkdir(path.dirname(localPath(to)), { recursive: true });
+    await copyFile(localPath(from), localPath(to));
+    return (await stat(localPath(to))).size;
+  }
+  const source = `${BUCKET}/${from.split('/').map(encodeURIComponent).join('/')}`;
+  await s3.send(new CopyObjectCommand({ Bucket: BUCKET, Key: to, CopySource: source, ContentType: contentTypeFor(to), MetadataDirective: 'REPLACE' }));
+  const head = await s3.send(new HeadObjectCommand({ Bucket: BUCKET, Key: to }));
+  return head.ContentLength ?? 0;
 }
 
 /** Deletes single stored objects (and their local copies). Missing ones are fine. */

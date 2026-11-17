@@ -8,13 +8,16 @@ export type BookJobChapter = { index: number; title: string; status: 'queued' | 
 // The job id is also the book's id in Supabase, so a finished chapter can be opened in Book Details straight away.
 export type BookJob = {
   jobId: string;
+  // Set by the server when it wants faster polling (the presentation demo).
+  pollMs?: number;
   status: 'processing' | 'done' | 'error';
   stage: string;
   chapters?: BookJobChapter[];
   // The voices are made and narration waits for the reader to approve the cast (see narrators.ts setBookCast).
   awaitingCast?: boolean;
   cast?: CastMember[];
-  result?: { roster?: { characters: Array<{ name: string }> } };
+  // openBook: the finished book should open straight away (the presentation demo).
+  result?: { roster?: { characters: Array<{ name: string }> }; openBook?: boolean };
   // On a finished job, notes chapters that couldn't be narrated.
   error?: string;
 };
@@ -44,7 +47,7 @@ export async function processBook(file: DocumentPickerAsset, onUpdate: (job: Boo
   let job = await readJson<BookJob>(await fetch(`${VOICE_SERVER_URL}/api/books/process`, { method: 'POST', body: form, headers }));
   onUpdate(job);
   while (job.status === 'processing') {
-    await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
+    await new Promise((resolve) => setTimeout(resolve, job.pollMs ?? POLL_INTERVAL_MS));
     try {
       job = await readJson<BookJob>(await fetch(`${VOICE_SERVER_URL}/api/books/jobs/${job.jobId}`, { headers }));
       onUpdate(job);
