@@ -8,6 +8,7 @@ import { EmptyState } from '../../components/EmptyState';
 import { CityLoader } from '../../components/CityLoader';
 import { Reveal } from '../../components/Reveal';
 import { RoomTags } from '../../components/RoomTags';
+import { Avatar } from '../../components/Avatar';
 import { colors, fonts, type } from '../../../theme';
 import { confirm, notify } from '../../../lib/notify';
 import {
@@ -132,6 +133,9 @@ export default function Room() {
     setData((d) => d && { ...d, friends: new Map(d.friends).set(userId, d.friends.get(userId) === 'received' ? 'received' : 'sent') });
   });
 
+  // Tapping someone's name or picture opens their profile (stats, rooms in common, mutual friends, friend request).
+  const openProfile = (userId: string) => router.push({ pathname: '/Test/user', params: { id: userId } });
+
   const shareCode = () => {
     if (!room?.inviteCode) return;
     Share.share({ message: `Join my book room “${room.name}” on Echo. We’re reading ${room.bookTitle}. Invite code: ${room.inviteCode}` }).catch(() => {});
@@ -207,11 +211,13 @@ export default function Room() {
               {data.members.length === 0 && <Text style={type.meta}>Nobody has joined yet.</Text>}
               {data.members.map((m) => (
                 <View key={m.id} style={s.member}>
-                  <View style={s.avatar}><Text style={s.avatarText}>{m.name.charAt(0).toUpperCase()}</Text></View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={s.author}>{m.name}{m.owner ? '  ·  made this room' : ''}</Text>
-                    {m.username !== '' && !m.me && <Text style={type.meta}>@{m.username}</Text>}
-                  </View>
+                  <Pressable onPress={() => openProfile(m.id)} style={[s.person, { flex: 1 }]} accessibilityRole="button" accessibilityLabel={`Open ${m.name}'s profile`}>
+                    <Avatar name={m.name} path={m.avatarPath} />
+                    <View style={{ flex: 1 }}>
+                      <Text style={s.author}>{m.name}{m.owner ? '  ·  made this room' : ''}</Text>
+                      {m.username !== '' && !m.me && <Text style={type.meta}>@{m.username}</Text>}
+                    </View>
+                  </Pressable>
                   {!m.me && friendButton(m.id)}
                 </View>
               ))}
@@ -254,8 +260,10 @@ export default function Room() {
             <Reveal key={p.id} index={Math.min(i + 3, 8)}>
               <View style={s.post}>
                 <View style={s.postHead}>
-                  <View style={s.avatar}><Text style={s.avatarText}>{p.author.charAt(0).toUpperCase()}</Text></View>
-                  <Text style={s.author}>{p.author}</Text>
+                  <Pressable onPress={() => openProfile(p.userId)} style={s.person} hitSlop={6} accessibilityRole="button" accessibilityLabel={`Open ${p.author}'s profile`}>
+                    <Avatar name={p.author} path={p.avatarPath} />
+                    <Text style={s.author}>{p.author}</Text>
+                  </Pressable>
                   <Text style={[type.meta, { flex: 1 }]}>{p.chapterIndex !== null ? `· Ch. ${p.chapterIndex + 1} ` : ''}· {ago(p.createdAt)}</Text>
                   {p.mine ? (
                     <Pressable onPress={() => remove(p)} hitSlop={10} accessibilityRole="button" accessibilityLabel="Delete your post">
@@ -322,6 +330,7 @@ const s = StyleSheet.create({
   joinText: { fontFamily: fonts.sansBold, fontSize: 15, color: '#29123C' },
   post: { gap: 10, paddingVertical: 18, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: 'rgba(255,255,255,0.18)' },
   postHead: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  person: { flexDirection: 'row', alignItems: 'center', gap: 10, flexShrink: 1 },
   avatar: { width: 28, height: 28, borderRadius: 14, backgroundColor: 'rgba(155,107,214,0.4)', alignItems: 'center', justifyContent: 'center' },
   avatarText: { fontFamily: fonts.sansBold, fontSize: 13, color: colors.text },
   author: { fontFamily: fonts.sansBold, fontSize: 14, color: colors.text },

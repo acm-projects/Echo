@@ -14,7 +14,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import { zodOutputFormat } from '@anthropic-ai/sdk/helpers/zod';
 import { chunkText, extractBook, gutenbergBook, wordCount, type ExtractedBook } from './book-text.js';
 import { clearLocalCopies, deleteKeys, deletePrefix, dropLocalCopies, initStorage, listKeys, localCopy, playbackSource, putBytes, putBytesKeepingLocal, putFile, readText, storageMode } from './storage.js';
-import { dbMode, deleteNarratorVoice, failInterruptedBooks, resetChapterAudio, getBookOwner, getStaleBookIds, getNarratorVoices, getVoiceUsage, initDb, setBookCast, setBookChapters, setBookDeleted, setBookFailed, setBookProcessing, setBookQueued, setBookReady, setBookSource, setChapterAudio, setChapterStatus, setCharacterVoice, setNarratorSample, setNarratorVoice, setSelectedNarrator, touchBook, userFromAuthorization, setBookCover } from './db.js';
+import { dbMode, deleteNarratorVoice, failInterruptedBooks, resetChapterAudio, getBookOwner, getStaleBookIds, getNarratorVoices, getVoiceUsage, initDb, setBookCast, setBookChapters, setBookDeleted, setBookFailed, setBookProcessing, setBookQueued, setBookReady, setBookSource, setChapterAudio, setChapterStatus, setCharacterVoice, setNarratorSample, setNarratorVoice, setSelectedNarrator, touchBook, userFromAuthorization, setBookCover, setUserAvatar, getProfileFor } from './db.js';
 import { generatePdfCover } from './book-cover.js';
 import { randomUUID as coverUUID } from 'node:crypto';
 
@@ -1856,7 +1856,7 @@ async function canReadFile(request: { headers: Record<string, string | string[] 
 // Plays a path stored in a Supabase row (chapters.audio_s3_url, characters.voice_sample_path,
 // narrator_voices.preview_path). Only listening files are served; uploaded books and cloning references are not.
 
-const PLAYABLE_PATH = /^(books\/[0-9a-f-]{36}\/(audio\.mp3|chapters\/\d{3}\.mp3|voices\/[\w-]+\.wav|cover-original\.png|cover-custom-[0-9a-f-]{36}\.(png|jpe?g|webp))|narrators\/[\w-]+\/[\w-]+\/preview\.wav|voice-lab\/[\w-]+\.wav)$/i;
+const PLAYABLE_PATH = /^(books\/[0-9a-f-]{36}\/(audio\.mp3|chapters\/\d{3}\.mp3|voices\/[\w-]+\.wav|cover-original\.png|cover-custom-[0-9a-f-]{36}\.(png|jpe?g|webp))|narrators\/[\w-]+\/[\w-]+\/preview\.wav|voice-lab\/[\w-]+\.wav|avatars\/[0-9a-f-]{36}\/[0-9a-f-]{36}\.(png|jpe?g|webp))$/i;
 app.get('/api/files/*', async (request, reply) => {
   const key = (request.params as { '*': string })['*'];
   if (!PLAYABLE_PATH.test(key)) return reply.code(404).send({ error: 'File not found.' });
@@ -1885,6 +1885,54 @@ const COVER_TYPES = {
   'image/jpeg': 'jpg',
   'image/webp': 'webp',
 } as const;
+
+// Another reader's profile (stats, rooms in common, mutual friends). Stats and friend lists are private to each
+// reader in Supabase, so this reads them with the service key and applies the person's profile visibility.
+app.get('/api/users/:userId/profile', async (request, reply) => {
+  const { userId } = request.params as { userId: string };
+  const who = await requester(request);
+  if (!who.signedIn) return reply.code(401).send({ error: 'Sign in to see profiles.' });
+  if (!/^[0-9a-f-]{36}$/i.test(userId)) return reply.code(404).send({ error: 'Profile not found.' });
+  const profile = await getProfileFor(who.id, userId);
+  if (!profile) return reply.code(404).send({ error: 'Profile not found.' });
+  return profile;
+});
+
+// Profile pictures. Profiles are visible to every signed-in reader, so canReadFile lets anyone read avatars/ (it only
+// restricts book and narrator files). Stored as avatars/<user>/<random>.<ext>; the picture it replaces is deleted.
+app.post('/api/me/avatar', async (request, reply) => {
+  const who = await requester(request);
+  if (!who.signedIn) return reply.code(401).send({ error: 'Sign in to change your picture.' });
+  try {
+    const upload = await request.file({ limits: { fileSize: COVER_MAX_BYTES, files: 1 } });
+    if (!upload) return reply.code(400).send({ error: 'Choose a picture.' });
+    const extension = COVER_TYPES[upload.mimetype as keyof typeof COVER_TYPES];
+    if (!extension) return reply.code(400).send({ error: 'Choose a PNG, JPEG, or WebP image.' });
+    const buffer = await upload.toBuffer();
+    const valid = (extension === 'png' && buffer.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])))
+      || (extension === 'jpg' && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff)
+      || (extension === 'webp' && buffer.subarray(0, 4).toString() === 'RIFF' && buffer.subarray(8, 12).toString() === 'WEBP');
+    if (!buffer.length || buffer.length > COVER_MAX_BYTES || !valid) return reply.code(400).send({ error: 'That file isn\u2019t a valid image.' });
+    const avatarPath = `avatars/${who.id}/${coverUUID()}.${extension}`;
+    await putBytes(avatarPath, buffer);
+    const previous = await setUserAvatar(who.id, avatarPath);
+    if (previous?.startsWith(`avatars/${who.id}/`)) await deleteKeys([previous]).catch(() => {});
+    return { avatar_url: avatarPath };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '';
+    if (/file.*large|size.*limit|too large/i.test(message)) return reply.code(413).send({ error: 'Choose an image smaller than 5 MB.' });
+    request.log.error({ error }, 'Avatar upload failed');
+    return reply.code(500).send({ error: 'Could not save your picture.' });
+  }
+});
+
+app.delete('/api/me/avatar', async (request, reply) => {
+  const who = await requester(request);
+  if (!who.signedIn) return reply.code(401).send({ error: 'Sign in to change your picture.' });
+  const previous = await setUserAvatar(who.id, null);
+  if (previous?.startsWith(`avatars/${who.id}/`)) await deleteKeys([previous]).catch(() => {});
+  return { avatar_url: null };
+});
 
 app.post('/api/books/:jobId/cover', async (request, reply) => {
   const { jobId } = request.params as { jobId: string };

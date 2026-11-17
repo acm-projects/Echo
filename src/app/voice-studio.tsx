@@ -119,7 +119,6 @@ function VoiceStudio() {
       setName('');
       setDescription('');
       setSampleText('');
-      void play(next.voice);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'The voice could not be designed.');
     } finally {
@@ -142,7 +141,6 @@ function VoiceStudio() {
       setName('');
       setRecording(null);
       setConsent(false);
-      void play(next.voice);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'The recording could not be used.');
     } finally {
