@@ -14,7 +14,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import { zodOutputFormat } from '@anthropic-ai/sdk/helpers/zod';
 import { chunkText, extractBook, gutenbergBook, wordCount, type ExtractedBook } from './book-text.js';
 import { clearLocalCopies, copyKey, deleteKeys, deletePrefix, dropLocalCopies, initStorage, listKeys, localCopy, playbackSource, putBytes, putBytesKeepingLocal, putFile, readText, storageMode } from './storage.js';
-import { dbMode, deleteNarratorVoice, failInterruptedBooks, resetChapterAudio, getBookOwner, getStaleBookIds, getNarratorVoices, getVoiceUsage, initDb, setBookCast, setBookChapters, setBookDeleted, setBookFailed, setBookProcessing, setBookQueued, setBookReady, setBookSource, setChapterAudio, setChapterStatus, setCharacterVoice, setNarratorSample, setNarratorVoice, setSelectedNarrator, touchBook, userFromAuthorization, setBookCover, setUserAvatar, getProfileFor } from './db.js';
+import { dbMode, deleteNarratorVoice, failInterruptedBooks, resetChapterAudio, getBookOwner, getStaleBookIds, getNarratorVoices, getVoiceUsage, initDb, setBookCast, setBookChapters, setBookDeleted, setBookFailed, setBookProcessing, setBookQueued, setBookReady, setBookSource, setChapterAudio, setChapterStatus, setCharacterVoice, setNarratorSample, setNarratorVoice, setSelectedNarrator, touchBook, userFromAuthorization, setBookCover, setUserAvatar, getProfileFor, bookTitlesEver } from './db.js';
 import { generatePdfCover } from './book-cover.js';
 import { randomUUID as coverUUID } from 'node:crypto';
 
@@ -1422,7 +1422,8 @@ const DEMO_STAGE_MS = 650;
 const DEMO_LINE_MS = 280;
 const demoPause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-async function runDemoBook(state: JobState, sourceBuffer?: Buffer): Promise<void> {
+// instant: the shelf copy every reader gets (no pauses, no cast review); otherwise the staged demo upload.
+async function runDemoBook(state: JobState, sourceBuffer?: Buffer, instant = false): Promise<void> {
   const { jobId } = state;
   if (running.has(jobId)) return;
   const template = await loadJob(state.demoOf ?? DEMO_BOOK_ID).catch(() => undefined);
@@ -1438,6 +1439,7 @@ async function runDemoBook(state: JobState, sourceBuffer?: Buffer): Promise<void
   runDone.set(jobId, new Promise<void>((resolve) => { finishRun = resolve; }));
   const folder = bookFolder(jobId);
   const multi = template.chapters.length > 1;
+  const wait = (ms: number) => (instant ? Promise.resolve() : demoPause(ms));
   const setStage = (stage: string) => publishJob(state, { stage });
   const check = () => {
     if (cancelled.has(jobId)) throw new Error('The book was removed.');
@@ -1466,10 +1468,10 @@ async function runDemoBook(state: JobState, sourceBuffer?: Buffer): Promise<void
     if (!state.castReady) {
       // The template's chapters and splits, so the text matches the audio that will be copied.
       state.chapters = template.chapters.map(({ index, title, text, startOffset }) => ({ index, title, text, startOffset, status: 'queued' as const }));
-      Object.assign(state, { characterVoices: true, reviewCast: true, castApproved: false, voices: {}, designedVoices: {}, narrated: {} });
+      Object.assign(state, { characterVoices: true, reviewCast: !instant, castApproved: false, voices: {}, designedVoices: {}, narrated: {} });
       await save();
       setStage('Reading the book with Claude');
-      await demoPause(DEMO_STAGE_MS * 2);
+      await wait(DEMO_STAGE_MS * 2);
       check();
       state.roster = structuredClone(template.roster);
       state.segments = structuredClone(template.segments);
@@ -1485,7 +1487,7 @@ async function runDemoBook(state: JobState, sourceBuffer?: Buffer): Promise<void
           ? { voiceId: voice.voiceId, referenceKey: key, samplePath: key, source: 'narrator', label: voice.label ?? 'Story narrator' }
           : { voiceId: voice.voiceId, referenceKey: key, samplePath: key, source: 'designed' };
         if (name !== 'Narrator') state.designedVoices![name] = state.voices[name];
-        await demoPause(DEMO_STAGE_MS);
+        await wait(DEMO_STAGE_MS);
       }
       const roster = state.roster;
       await record('cast', () => setBookCast(jobId, roster.characters.map((character) => ({ ...character, voiceId: state.voices[character.name]?.voiceId, voiceSamplePath: state.voices[character.name]?.samplePath }))));
@@ -1510,15 +1512,15 @@ async function runDemoBook(state: JobState, sourceBuffer?: Buffer): Promise<void
       publishJob(state);
       await record('chapter status', () => setChapterStatus(jobId, chapter.index, 'processing'));
       stage('Splitting scenes');
-      await demoPause(DEMO_STAGE_MS);
+      await wait(DEMO_STAGE_MS);
       const lines = Math.max(1, mergeSegments(state.segments[chapter.index] ?? []).length);
       for (let line = 1; line <= lines; line += 1) {
         check();
         stage(`Narrating (${line}/${lines})`);
-        await demoPause(DEMO_LINE_MS);
+        await wait(DEMO_LINE_MS);
       }
       stage('Mixing the audio');
-      await demoPause(DEMO_STAGE_MS / 2);
+      await wait(DEMO_STAGE_MS / 2);
       check();
       stage('Saving the audio');
       const audioKey = chapterAudioKey(jobId, chapter.index, state.chapters.length);
@@ -1560,6 +1562,38 @@ async function runDemoBook(state: JobState, sourceBuffer?: Buffer): Promise<void
     finishRun();
   }
 }
+
+// Every reader's shelf gets its own copy of the demo book, made the first time they open the shelf (an instant demo
+// copy: the template's voices and audio copied in S3). Once per reader: anyone who has ever had a book of that title,
+// deleted ones included, isn't given another, so a deleted copy stays deleted.
+const shelfCopiesInProgress = new Set<string>();
+app.post('/api/demo/shelf-copy', async (request, reply) => {
+  const who = await requester(request);
+  if (!who.signedIn) return reply.code(401).send({ error: 'Sign in first.' });
+  if (shelfCopiesInProgress.has(who.id)) return { created: false };
+  shelfCopiesInProgress.add(who.id);
+  try {
+    const titles = await bookTitlesEver(who.id);
+    if (!titles || titles.some(isDemoTitle)) return { created: false };
+    const template = await loadJob(DEMO_BOOK_ID);
+    if (!template?.chapters.length) return { created: false };
+    const source = await readText(template.sourceKey).catch(() => undefined);
+    if (!source) return { created: false };
+    const jobId = randomUUID();
+    const title = 'The Night Ferry';
+    const state: JobState = {
+      jobId, userId: who.id, testId: who.testId, signedIn: true, server: SERVER_NAME,
+      sourceKey: `${bookFolder(jobId)}/source.txt`, title, characterVoices: true, status: 'processing',
+      chapters: [], voices: {}, segments: {}, narrated: {}, demoOf: DEMO_BOOK_ID,
+    };
+    await runDemoBook(state, Buffer.from(source), true);
+    const created = state.status === 'done';
+    app.log.info({ jobId, userId: who.id, created }, 'Demo book added to a shelf');
+    return { created, bookId: created ? jobId : undefined };
+  } finally {
+    shelfCopiesInProgress.delete(who.id);
+  }
+});
 
 // After Stop: the narrated audio is deleted (chapter MP3s, the manifest, line audio), every chapter waits again, and
 // the book waits at its cast review. The source, the cast's voices and Claude's scene splits stay, so starting again

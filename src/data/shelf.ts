@@ -1,5 +1,23 @@
 import type { Book, Chapter, UserProgress } from './types';
 import { getBookChapters, getMyBooks, getMyProgress } from './index';
+import { signedInClient } from './supabaseRows';
+import { VOICE_SERVER_URL, voiceServerHeaders } from './voiceServer';
+
+// Every reader gets their own copy of the demo book (The Night Ferry) the first time their shelf loads; the server
+// makes it once per account and never again after it's deleted. Asked once per account each time the app runs.
+const askedForDemo = new Map<string, Promise<void>>();
+function ensureDemoBook() {
+  return signedInClient().then((client) => {
+    if (!client) return;
+    if (!askedForDemo.has(client.userId)) {
+      askedForDemo.set(client.userId, voiceServerHeaders()
+        .then((headers) => fetch(`${VOICE_SERVER_URL}/api/demo/shelf-copy`, { method: 'POST', headers }))
+        .then(() => undefined, () => undefined));
+    }
+    // The shelf never waits long on this: an unreachable server just means no copy this time.
+    return Promise.race([askedForDemo.get(client.userId), new Promise<void>((resolve) => setTimeout(resolve, 8000))]);
+  }).catch(() => undefined);
+}
 
 // The signed-in reader's books with how far through each one they are, most recently listened first.
 // Shared by the Your Shelf tab and anything else that shows the reader's own books.
@@ -72,6 +90,7 @@ function calculateProgress(
 }
 
 export async function loadShelf(): Promise<DisplayBook[]> {
+  await ensureDemoBook();
   // Fetch the current user's books and listening progress.
   const [books, progress] = await Promise.all([
     getMyBooks(),

@@ -317,3 +317,11 @@ export async function getProfileFor(viewerId: string, userId: string): Promise<P
     mutualFriends: (people ?? []).map((p) => ({ id: p.id, username: p.username, displayName: p.display_name, avatarUrl: p.avatar_url })),
   };
 }
+
+/** Every book title the reader has had, deleted ones included (to tell whether they were already given a book). */
+export async function bookTitlesEver(userId: string) {
+  if (!db) return undefined;
+  const { data, error } = await db.from('books').select('title').eq('user_id', userId).limit(1000);
+  if (error) throw error;
+  return (data ?? []).map((row) => row.title);
+}
