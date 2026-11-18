@@ -30,31 +30,40 @@ Things to keep in mind:
 
 ### Hidden demo switches (Profile → Help & support)
 
-Nothing on screen changes when you flip either switch. Each is saved on this device only, per account.
+Neither switch shows that it flipped; check the shelf or Voice Studio to see the result. Each is saved on this device
+only, per account. The two switches are **separate**: neither one changes the other. Every five quick taps flip the
+switch once, so ten taps put it back where it started.
 
 | Switch | How | What it does |
 | --- | --- | --- |
-| **Night Ferry** | Five quick taps (within 2 s) on the line *"Questions from fellow night listeners."* | Hides or shows The Night Ferry on your shelf. Flipping it also sets the demo narrator to match: hiding the book hides the narrator, showing it shows the narrator. |
-| **Demo narrator** | Five quick taps in the empty space under the questions | Hides or shows only the "Narrator" voice (British, male, confident). It never shows or hides the book. |
+| **Night Ferry** | Five quick taps (within 2 s) on the line *"Questions from fellow night listeners."* | Hides or shows The Night Ferry on your shelf. |
+| **Demo narrator** | Five quick taps (within 2 s) on the question *"Can I change the narrator's voice?"* (the 4th question). It opens and closes as you tap; that's normal. | Hides or shows the "Narrator" voice (British, male, confident) and turns the narrator failsafe on or off. |
 
-On the presenter account (dal363209@utdallas.edu), both start out hidden. To check where they are, open Voice Studio and your
-shelf. To re-sync them, show The Night Ferry and hide it again; both are then hidden.
+On the presenter account (dal363209@utdallas.edu), both start out hidden. To check where they are, look at your shelf
+(The Night Ferry) and Voice Studio ("Narrator").
 
 ### Narrator failsafe
 
-While the demo narrator is hidden, tapping **Create** in Voice Studio (Describe a voice or Upload a recording) starts a
-timer. If the new voice isn't ready in time, the studio stops waiting, clears the form, and the "Narrator" voice appears in
-the list as if it had just been made. When the slow voice finishes in the background, it's deleted automatically (even if
-you've left Voice Studio), so it never shows up. It still counts toward the day's voice limit.
+The failsafe is on only while the demo narrator is hidden. Tapping **Create** in Voice Studio (Describe a voice or
+Upload a recording) starts a timer. If the new voice isn't ready in time:
 
-Once the narrator is shown, the timer is off and creating voices works as normal. It stays shown until you re-hide it with
-either switch above.
+- The studio stops waiting, clears the form, and shows "Narrator" in the list as if it had just been made.
+- When the slow voice finishes in the background, it's deleted automatically (even if you've left Voice Studio), so it
+  never shows up. It still counts toward the day's voice limit.
+- The Night Ferry stays exactly as it was (hidden stays hidden).
+
+After it fires, "Narrator" stays shown, the timer is off, and creating voices works as normal. To arm the failsafe
+again, hide the narrator with its switch (five taps on "Can I change the narrator's voice?").
 
 **Changing the time:** edit `NARRATOR_FAILSAFE_SECONDS` in [src/data/demoSettings.ts](src/data/demoSettings.ts)
 (currently `32`). Save the file and reload the app.
 
-> Before presenting: make sure the "Narrator" voice isn't your selected narrator, so the voice list looks untouched until
-> the failsafe fires. While it's hidden, the app treats your account as having no narrator selected.
+> Before presenting: make sure the "Narrator" voice isn't your selected narrator. While it's hidden, the app treats your
+> account as having no narrator selected.
+
+**Reset after a dry run:** hide the narrator again (five taps on "Can I change the narrator's voice?"). If a Night Ferry copy was made
+during the run, flip the book switch twice (five taps on the intro line, wait a moment, five taps again). The first flip
+shows every copy and the second hides all of them, including the new one.
 
 ### Will it work on school Wi-Fi?
 

@@ -42,23 +42,19 @@ export async function tuckedBookIds(userId: string, books: Array<{ id: string; t
   return cache.get(userId)!;
 }
 
-/**
- * Hides this account's current demo-book copies, or shows them again. Returns whether they're hidden now. The demo
- * narrator follows along: hidden with the book, shown with it.
- */
+/** Hides this account's current demo-book copies, or shows them again. Returns whether they're hidden now. */
 export async function toggleTucked(userId: string, books: Array<{ id: string; title: string }>) {
   const hidden = await tuckedBookIds(userId, books);
   const next = hidden.size ? [] : demoCopies(books);
   await save(userId, next);
-  await setNarratorTucked(userId, next.length > 0);
   return next.length > 0;
 }
 
 // ---- the demo narrator ---------------------------------------------------------------------------------------------
 // A ready-made voice on the presenter's account ("Narrator": British, male, confident), kept out of the voice lists
 // while hidden. If making a voice live takes longer than NARRATOR_FAILSAFE_SECONDS, it appears (armNarratorFailsafe)
-// and stays shown until the Night Ferry switch is flipped to shown and back to hidden, or its own switch is flipped
-// (five quick taps under the questions in Help & support). Showing it never shows the book.
+// and stays shown until its own switch hides it again (five quick taps on "Can I change the narrator's voice?" in Help & support). It's
+// separate from the book's switch: neither one changes the other.
 
 export const DEMO_NARRATOR_VOICE = 'voice_sjfkfs08iwc8';
 const narratorKeyFor = (userId: string) => `echo.studio.tucked.${userId}`;

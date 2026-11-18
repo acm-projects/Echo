@@ -19,6 +19,9 @@ const FAQ = [
   { q: 'Can I change the narrator’s voice?', a: 'Yes. Open Settings → Voices → Narrator voice to pick one or describe a new voice in your own words.' },
 ];
 
+// The question whose taps double as the demo narrator's switch.
+const NARRATOR_QUESTION = FAQ[3].q;
+
 // Flips the hidden demo switch for whoever is signed in, against every book on the account (hidden ones included).
 async function flipTucked() {
   const { data } = await supabase.auth.getSession();
@@ -31,7 +34,8 @@ export default function Help() {
   const [open, setOpen] = useState<number | null>(0);
   // Five quick taps on the intro line flip the hidden demo switch (see data/tucked.ts). Taps, not a long press, so the
   // phone never offers to look up or select the words.
-  // Five quick taps in the empty space under the questions flip only the demo narrator (hidden or shown).
+  // Five quick taps on the "Can I change the narrator's voice?" question flip only the demo narrator (hidden or shown).
+  // The question still opens and closes as usual with each tap.
   const taps = useRef<number[]>([]);
   const fiveTaps = (list: { current: number[] }, action: () => Promise<unknown>) => () => {
     const now = Date.now();
@@ -57,7 +61,7 @@ export default function Help() {
         </Pressable>
         <View style={s.card}>
           {FAQ.map((item, i) => (
-            <Pressable key={item.q} onPress={() => toggle(i)} style={[s.item, i < FAQ.length - 1 && s.line]} accessibilityRole="button" accessibilityState={{ expanded: open === i }}>
+            <Pressable key={item.q} onPress={() => { toggle(i); if (item.q === NARRATOR_QUESTION) narratorTap(); }} style={[s.item, i < FAQ.length - 1 && s.line]} accessibilityRole="button" accessibilityState={{ expanded: open === i }}>
               <View style={s.qRow}>
                 <Text style={s.q}>{item.q}</Text>
                 <Ionicons name={open === i ? 'remove' : 'add'} size={20} color={colors.pink} />
@@ -66,7 +70,6 @@ export default function Help() {
             </Pressable>
           ))}
         </View>
-        <Pressable onPress={narratorTap} accessible={false} style={[s.quietSpace, s.noSelect]} />
 
         {SUPPORT_EMAIL !== '' && <View style={s.contact}>
           <Text style={s.contactTitle}>Still stuck?</Text>
@@ -79,9 +82,7 @@ export default function Help() {
 }
 
 const s = StyleSheet.create({
-  page: { paddingHorizontal: 20, paddingBottom: 80 },
-  // The blank area under the questions (the second hidden switch); same height the page's bottom padding used to give.
-  quietSpace: { height: 120 },
+  page: { paddingHorizontal: 20, paddingBottom: 200 },
   // Web: no word selection or iOS callout on repeated taps.
   noSelect: { userSelect: 'none', WebkitUserSelect: 'none', WebkitTouchCallout: 'none' } as object,
   intro: { fontFamily: fonts.serifItalic, fontSize: 16, color: colors.dim, marginBottom: 16, marginLeft: 4 },
