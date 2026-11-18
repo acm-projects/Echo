@@ -42,10 +42,90 @@ export async function tuckedBookIds(userId: string, books: Array<{ id: string; t
   return cache.get(userId)!;
 }
 
-/** Hides this account's current demo-book copies, or shows them again. Returns whether they're hidden now. */
+/**
+ * Hides this account's current demo-book copies, or shows them again. Returns whether they're hidden now. The demo
+ * narrator follows along: hidden with the book, shown with it.
+ */
 export async function toggleTucked(userId: string, books: Array<{ id: string; title: string }>) {
   const hidden = await tuckedBookIds(userId, books);
   const next = hidden.size ? [] : demoCopies(books);
   await save(userId, next);
+  await setNarratorTucked(userId, next.length > 0);
   return next.length > 0;
+}
+
+// ---- the demo narrator ---------------------------------------------------------------------------------------------
+// A ready-made voice on the presenter's account ("Narrator": British, male, confident), kept out of the voice lists
+// while hidden. If making a voice live takes longer than NARRATOR_FAILSAFE_SECONDS, it appears (armNarratorFailsafe)
+// and stays shown until the Night Ferry switch is flipped to shown and back to hidden, or its own switch is flipped
+// (five quick taps under the questions in Help & support). Showing it never shows the book.
+
+export const DEMO_NARRATOR_VOICE = 'voice_sjfkfs08iwc8';
+const narratorKeyFor = (userId: string) => `echo.studio.tucked.${userId}`;
+const narratorCache = new Map<string, boolean>();
+
+async function signedInUserId() {
+  const { supabase } = await import('../../lib/supabase');
+  return (await supabase.auth.getSession()).data.session?.user.id ?? null;
+}
+
+/** Whether the demo narrator is hidden for this account. With nothing saved, hidden for the presenter (like the book). */
+export async function narratorTucked(userId: string): Promise<boolean> {
+  const cached = narratorCache.get(userId);
+  if (cached !== undefined) return cached;
+  let hidden = userId === DEMO_OWNER;
+  try {
+    const raw = await AsyncStorage.getItem(narratorKeyFor(userId));
+    if (raw !== null) hidden = raw === '1';
+  } catch {}
+  narratorCache.set(userId, hidden);
+  return hidden;
+}
+
+export async function setNarratorTucked(userId: string, hidden: boolean) {
+  narratorCache.set(userId, hidden);
+  await AsyncStorage.setItem(narratorKeyFor(userId), hidden ? '1' : '0').catch(() => {});
+}
+
+/** Flips only the demo narrator for whoever is signed in. Returns whether it's hidden now. */
+export async function toggleNarratorTucked() {
+  const userId = await signedInUserId();
+  if (!userId) return false;
+  const next = !(await narratorTucked(userId));
+  await setNarratorTucked(userId, next);
+  return next;
+}
+
+/** Drops the demo narrator from a voice list while it's hidden for the signed-in reader (and clears it as selected). */
+export async function withoutTuckedNarrator<T extends { voices: Array<{ id: string }>; selectedId: string | null }>(state: T): Promise<T> {
+  if (!state.voices.some((voice) => voice.id === DEMO_NARRATOR_VOICE)) return state;
+  const userId = await signedInUserId().catch(() => null);
+  if (!userId || !(await narratorTucked(userId))) return state;
+  return {
+    ...state,
+    voices: state.voices.filter((voice) => voice.id !== DEMO_NARRATOR_VOICE),
+    selectedId: state.selectedId === DEMO_NARRATOR_VOICE ? null : state.selectedId,
+  };
+}
+
+/**
+ * Call when Create is tapped. While the demo narrator is hidden, it's shown after `seconds` (from this call) unless the
+ * returned cancel runs first, then `onReveal` runs. While it's shown, this does nothing.
+ */
+export function armNarratorFailsafe(seconds: number, onReveal: () => void): () => void {
+  const startedAt = Date.now();
+  let cancelled = false;
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  void (async () => {
+    const userId = await signedInUserId().catch(() => null);
+    if (cancelled || !userId || !(await narratorTucked(userId)) || cancelled) return;
+    timer = setTimeout(() => {
+      if (cancelled) return;
+      void setNarratorTucked(userId, false).then(() => { if (!cancelled) onReveal(); });
+    }, Math.max(0, seconds * 1000 - (Date.now() - startedAt)));
+  })();
+  return () => {
+    cancelled = true;
+    if (timer) clearTimeout(timer);
+  };
 }

@@ -1,6 +1,7 @@
 import type { DocumentPickerAsset } from 'expo-document-picker';
 
 import { mediaUrl, VOICE_SERVER_URL, voiceServerHeaders } from './voiceServer';
+import { withoutTuckedNarrator } from './tucked';
 
 export { VOICE_SERVER_URL };
 
@@ -54,11 +55,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 export const narratorPreviewUrl = (voice: NarratorVoice) => mediaUrl(voice.previewPath);
 
 export function getNarrators() {
-  return request<NarratorState>('/api/narrators');
+  return request<NarratorState>('/api/narrators').then(withoutTuckedNarrator);
 }
 
 export function createNarrator(input: { name: string; description: string; sampleText?: string }) {
-  return request<NarratorState & { voice: NarratorVoice }>('/api/narrators', { method: 'POST', body: JSON.stringify(input) });
+  return request<NarratorState & { voice: NarratorVoice }>('/api/narrators', { method: 'POST', body: JSON.stringify(input) }).then(withoutTuckedNarrator);
 }
 
 /** Clones a voice from a recording the reader picked. `consent`: it's their own recording, or the speaker agreed. */
@@ -72,16 +73,16 @@ export async function uploadNarrator(input: { name: string; file: DocumentPicker
   const response = await fetch(`${VOICE_SERVER_URL}/api/narrators/upload`, { method: 'POST', body: form, headers: await voiceServerHeaders() });
   const data = await response.json() as NarratorState & { voice: NarratorVoice; error?: string };
   if (!response.ok) throw new Error(data.error ?? `Voice server request failed with ${response.status}.`);
-  return data;
+  return withoutTuckedNarrator(data);
 }
 
 export function selectNarrator(voiceId: string) {
-  return request<NarratorState>('/api/narrators/selected', { method: 'PUT', body: JSON.stringify({ voiceId }) });
+  return request<NarratorState>('/api/narrators/selected', { method: 'PUT', body: JSON.stringify({ voiceId }) }).then(withoutTuckedNarrator);
 }
 
 /** Removes a voice no book uses. The server refuses while a book still reads with it. */
 export function deleteNarrator(voiceId: string) {
-  return request<NarratorState>(`/api/narrators/${encodeURIComponent(voiceId)}`, { method: 'DELETE' });
+  return request<NarratorState>(`/api/narrators/${encodeURIComponent(voiceId)}`, { method: 'DELETE' }).then(withoutTuckedNarrator);
 }
 
 // ---- a book's cast -----------------------------------------------------------------------------------------------

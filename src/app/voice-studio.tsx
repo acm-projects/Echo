@@ -13,6 +13,8 @@ import { CityLoader } from '../components/CityLoader';
 import { EmptyState } from '../components/EmptyState';
 import { signedInClient } from '../data/supabaseRows';
 import { colors, fonts, type } from '../../theme';
+import { armNarratorFailsafe } from '../data/tucked';
+import { NARRATOR_FAILSAFE_SECONDS } from '../data/demoSettings';
 import { createNarrator, deleteNarrator, getNarrators, narratorPreviewUrl, selectNarrator, uploadNarrator, type NarratorState, type NarratorVoice } from '../data/narrators';
 
 const PROMPT_IDEAS = [
@@ -109,20 +111,48 @@ function VoiceStudio() {
     setPlayingId(voice.id);
   };
 
+  // Demo failsafe (data/tucked.ts): while the ready-made narrator is hidden, a voice that takes longer than
+  // NARRATOR_FAILSAFE_SECONDS from tapping Create is finished early by showing that narrator instead. When the slow
+  // request does finish, its voice is deleted straight away (even if the studio was left), so it never shows up.
+  const createAttempt = useRef(0);
+  const startCreate = (kind: 'design' | 'upload', clear: () => void) => {
+    const attempt = ++createAttempt.current;
+    setWorking(kind);
+    setError(null);
+    const disarm = armNarratorFailsafe(NARRATOR_FAILSAFE_SECONDS, () => {
+      if (createAttempt.current !== attempt) return;
+      createAttempt.current++;
+      clear();
+      setWorking(null);
+      void refresh().catch(() => {});
+    });
+    const current = () => createAttempt.current === attempt;
+    const done = () => {
+      disarm();
+      if (current()) setWorking(null);
+    };
+    return { current, done };
+  };
+
+  // A voice that finished after the failsafe showed the ready-made narrator: removed, quietly. Retried once in case the
+  // server is still settling; the studio's list never had it, so it's left as it is.
+  const discardLate = (voiceId: string) => {
+    deleteNarrator(voiceId).catch(() => setTimeout(() => { deleteNarrator(voiceId).catch(() => {}); }, 3000));
+  };
+
   const design = async () => {
     if (working) return;
-    setWorking('design');
-    setError(null);
+    const clear = () => { setName(''); setDescription(''); setSampleText(''); };
+    const run = startCreate('design', clear);
     try {
       const next = await createNarrator({ name: name.trim() || 'Narrator', description, sampleText: sampleText.trim() || undefined });
+      if (!run.current()) return discardLate(next.voice.id);
       setState(next);
-      setName('');
-      setDescription('');
-      setSampleText('');
+      clear();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'The voice could not be designed.');
+      if (run.current()) setError(err instanceof Error ? err.message : 'The voice could not be designed.');
     } finally {
-      setWorking(null);
+      run.done();
     }
   };
 
@@ -133,18 +163,17 @@ function VoiceStudio() {
 
   const upload = async () => {
     if (working || !recording) return;
-    setWorking('upload');
-    setError(null);
+    const clear = () => { setName(''); setRecording(null); setConsent(false); };
+    const run = startCreate('upload', clear);
     try {
       const next = await uploadNarrator({ name: name.trim() || 'My voice', file: recording, consent });
+      if (!run.current()) return discardLate(next.voice.id);
       setState(next);
-      setName('');
-      setRecording(null);
-      setConsent(false);
+      clear();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'The recording could not be used.');
+      if (run.current()) setError(err instanceof Error ? err.message : 'The recording could not be used.');
     } finally {
-      setWorking(null);
+      run.done();
     }
   };
 

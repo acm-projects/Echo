@@ -5,7 +5,7 @@ import { Screen } from '../../components/Screen';
 import { PageHeader } from '../../components/PageHeader';
 import { GradientButton } from '../../components/GradientButton';
 import { colors, fonts, type } from '../../../theme';
-import { toggleTucked } from '../../data/tucked';
+import { toggleNarratorTucked, toggleTucked } from '../../data/tucked';
 import { supabaseMyBooks } from '../../data/supabaseRows';
 import { supabase } from '../../../lib/supabase';
 
@@ -31,14 +31,18 @@ export default function Help() {
   const [open, setOpen] = useState<number | null>(0);
   // Five quick taps on the intro line flip the hidden demo switch (see data/tucked.ts). Taps, not a long press, so the
   // phone never offers to look up or select the words.
+  // Five quick taps in the empty space under the questions flip only the demo narrator (hidden or shown).
   const taps = useRef<number[]>([]);
-  const secretTap = () => {
+  const fiveTaps = (list: { current: number[] }, action: () => Promise<unknown>) => () => {
     const now = Date.now();
-    taps.current = [...taps.current.filter((at) => now - at < 2000), now];
-    if (taps.current.length < 5) return;
-    taps.current = [];
-    void flipTucked().catch(() => {});
+    list.current = [...list.current.filter((at) => now - at < 2000), now];
+    if (list.current.length < 5) return;
+    list.current = [];
+    void action().catch(() => {});
   };
+  const secretTap = fiveTaps(taps, flipTucked);
+  const narratorTaps = useRef<number[]>([]);
+  const narratorTap = fiveTaps(narratorTaps, toggleNarratorTucked);
   const toggle = (i: number) => {
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
     setOpen(open === i ? null : i);
@@ -62,6 +66,7 @@ export default function Help() {
             </Pressable>
           ))}
         </View>
+        <Pressable onPress={narratorTap} accessible={false} style={[s.quietSpace, s.noSelect]} />
 
         {SUPPORT_EMAIL !== '' && <View style={s.contact}>
           <Text style={s.contactTitle}>Still stuck?</Text>
@@ -74,7 +79,9 @@ export default function Help() {
 }
 
 const s = StyleSheet.create({
-  page: { paddingHorizontal: 20, paddingBottom: 200 },
+  page: { paddingHorizontal: 20, paddingBottom: 80 },
+  // The blank area under the questions (the second hidden switch); same height the page's bottom padding used to give.
+  quietSpace: { height: 120 },
   // Web: no word selection or iOS callout on repeated taps.
   noSelect: { userSelect: 'none', WebkitUserSelect: 'none', WebkitTouchCallout: 'none' } as object,
   intro: { fontFamily: fonts.serifItalic, fontSize: 16, color: colors.dim, marginBottom: 16, marginLeft: 4 },
